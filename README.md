@@ -180,6 +180,11 @@ mkdir -p ~/.config/ytmusic-tui
 cp config.example.toml ~/.config/ytmusic-tui/config.toml
 ```
 
+### Problemas comuns na instalação
+
+- **`Cannot find libmpv in the usual places`** (ou mensagem parecida do python-mpv) ao abrir o app: o Python não encontrou a libmpv. No Ubuntu/Debian instale também `sudo apt install libmpv-dev` — ele fornece o link `libmpv.so` que o Python procura (no Ubuntu 24.04, por exemplo, o pacote `mpv` sozinho nem sempre basta).
+- **A música não toca / o stream falha**: quase sempre é o yt-dlp desatualizado em relação a alguma mudança do YouTube — atualize o app e o yt-dlp no mesmo ambiente de instalação (`pip install -U yt-dlp` no venv, ou `pipx upgrade` + `pipx runpip ytmusic-tui install -U yt-dlp`).
+
 ## 🚀 Uso
 
 ```bash

@@ -20,10 +20,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # A libmpv é carregada no import de `mpv` (python-mpv); o ffmpeg não é
-      # usado pelos testes, mas garantimos o ambiente completo do app.
-      - name: Dependências de sistema (mpv + ffmpeg)
-        run: sudo apt-get update && sudo apt-get install -y mpv ffmpeg
+      # A libmpv é carregada no import de `mpv` (python-mpv), e o
+      # ctypes.util.find_library procura tanto `libmpv.so.2` quanto o link
+      # `libmpv.so`. No Ubuntu 24.04 o pacote `mpv` traz só o .so.2 e o
+      # find_library falha; o `libmpv-dev` fornece o link não-versionado.
+      - name: Dependências de sistema (mpv + libmpv + ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y mpv libmpv-dev ffmpeg
 
       - name: Instalar o app (com dependências de dev)
         run: pip install -e ".[dev]"
