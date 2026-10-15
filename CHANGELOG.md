@@ -4,6 +4,27 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
 O formato segue livremente o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [0.1.1] - 2026-10-15
+
+### Adicionado
+
+- Logging em arquivo (com rotação, em `~/.local/state/ytmusic-tui/log/` no
+  Linux) — nunca no stderr, que sujaria a TUI
+- Dependabot semanal para as dependências Python (PRs testadas pelo CI)
+
+### Alterado
+
+- A TUI foi dividida em módulos menores: `tui/screens.py` (tela principal),
+  `tui/widgets.py` (widgets) e controllers de reprodução, downloads e
+  biblioteca — o `app.py` ficou com o ciclo de vida do app e o `main()`
+  (sem mudança de comportamento)
+
+### Corrigido
+
+- Falha ao carregar a biblioteca local não parece mais uma "biblioteca vazia":
+  o erro aparece na aba 📚 (com a mensagem padrão preservada para quando o
+  carregamento voltar a funcionar) e fica registrado no log
+
 ## [0.1.0] - 2026-10-15
 
 Primeira versão publicada. 🎉
@@ -19,25 +40,12 @@ Primeira versão publicada. 🎉
 - Biblioteca local em SQLite (faixas baixadas e curtidas locais)
 - Configuração por TOML e variáveis de ambiente (`YTMUSIC_*`), editável na aba
   ⚙️ Config do app
-- Logging em arquivo (com rotação, em `~/.local/state/ytmusic-tui/log/` no
-  Linux) — nunca no stderr, que sujaria a TUI
-- 60 testes automatizados (offline, com mocks) + testes de integração opcionais
+- 55 testes automatizados (offline, com mocks) + testes de integração opcionais
   (`YTMUSIC_INTEGRATION=1`)
-- CI no GitHub Actions (ruff + testes em Python 3.11 e 3.13) e Dependabot
-  semanal para as dependências
-
-### Alterado
-
-- A TUI foi dividida em módulos menores: `tui/screens.py` (tela principal),
-  `tui/widgets.py` (widgets) e controllers de reprodução, downloads e
-  biblioteca — o `app.py` ficou com o ciclo de vida do app e o `main()`
-  (sem mudança de comportamento)
+- CI no GitHub Actions (ruff + testes em Python 3.11 e 3.13)
 
 ### Corrigido
 
-- Falha ao carregar a biblioteca local não parece mais uma "biblioteca vazia":
-  o erro aparece na aba 📚 (com a mensagem padrão preservada para quando o
-  carregamento voltar a funcionar) e fica registrado no log
 - Downloads duplicados: o mesmo vídeo não é mais enfileirado duas vezes
   enquanto está em andamento (dois downloads disputariam o mesmo arquivo)
 - Primeiro contato sem o mpv instalado agora mostra uma mensagem clara em vez
