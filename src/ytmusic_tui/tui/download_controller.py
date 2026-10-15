@@ -1,4 +1,5 @@
 """Ações de download na TUI (mixin de ``MainScreen``)."""
+
 from textual.widgets import DataTable
 
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager

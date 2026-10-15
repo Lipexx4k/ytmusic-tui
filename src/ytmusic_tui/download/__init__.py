@@ -1,4 +1,5 @@
 """Gerenciador de downloads usando yt-dlp (import tardio)."""
+
 import asyncio
 import re
 import threading
@@ -50,6 +51,7 @@ class DownloadStatus(Enum):
 @dataclass
 class DownloadTask:
     """Tarefa de download."""
+
     video_id: str
     title: str = ""
     artist: str = ""
@@ -137,39 +139,51 @@ class DownloadManager:
 
         # Post-processadores para conversão + metadados/capa
         if settings.download_format == "mp3":
-            opts["postprocessors"].append({
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": settings.download_quality,
-            })
+            opts["postprocessors"].append(
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": settings.download_quality,
+                }
+            )
         elif settings.download_format == "opus":
-            opts["postprocessors"].append({
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "opus",
-                "preferredquality": settings.download_quality,
-            })
+            opts["postprocessors"].append(
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "opus",
+                    "preferredquality": settings.download_quality,
+                }
+            )
         elif settings.download_format == "m4a":
-            opts["postprocessors"].append({
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "m4a",
-            })
+            opts["postprocessors"].append(
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                }
+            )
         elif settings.download_format == "flac":
-            opts["postprocessors"].append({
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "flac",
-            })
+            opts["postprocessors"].append(
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "flac",
+                }
+            )
 
         if settings.embed_metadata:
             # O EmbedThumbnail remove o .webp temporário ao terminar (quando
             # "already_have_thumbnail" não é passado) e o FFmpegMetadata grava
             # as tags — ambos válidos para qualquer formato de saída.
-            opts["postprocessors"].append({
-                "key": "FFmpegMetadata",
-                "add_metadata": True,
-            })
-            opts["postprocessors"].append({
-                "key": "EmbedThumbnail",
-            })
+            opts["postprocessors"].append(
+                {
+                    "key": "FFmpegMetadata",
+                    "add_metadata": True,
+                }
+            )
+            opts["postprocessors"].append(
+                {
+                    "key": "EmbedThumbnail",
+                }
+            )
 
         return opts
 

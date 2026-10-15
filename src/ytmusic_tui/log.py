@@ -5,6 +5,7 @@ tela. Por isso o pacote ``ytmusic_tui`` grava tudo em um arquivo no
 diretório de logs do sistema (``platformdirs``), com rotação para não
 crescer sem limite.
 """
+
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

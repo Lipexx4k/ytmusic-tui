@@ -1,4 +1,5 @@
 """Pacote da biblioteca local."""
+
 from ytmusic_tui.library.database import db_manager
 from ytmusic_tui.library.models import (
     Album,

@@ -1,4 +1,5 @@
 """Smoke test headless da TUI: navegação entre abas e render da busca."""
+
 import asyncio
 import logging
 
@@ -209,8 +210,9 @@ async def test_search_shows_albums_with_type_marker(monkeypatch):
 
         # Sem álbuns, a seção some e a lista de músicas ocupa o espaço
         screen.display_search_results(
-            SearchResult(tracks=[_song("v2", "Só música")], artists=[], albums=[],
-                         playlists=[], videos=[])
+            SearchResult(
+                tracks=[_song("v2", "Só música")], artists=[], albums=[], playlists=[], videos=[]
+            )
         )
         await pilot.pause()
         assert not albums.display
@@ -602,8 +604,7 @@ async def test_library_load_error_is_shown_not_empty(monkeypatch, caplog):
     # O erro fica registrado no log (nível ERROR, com a exceção)
     assert any(record.levelno == logging.ERROR for record in caplog.records)
     assert any(
-        "Falha ao carregar a biblioteca local" in record.getMessage()
-        for record in caplog.records
+        "Falha ao carregar a biblioteca local" in record.getMessage() for record in caplog.records
     )
 
 

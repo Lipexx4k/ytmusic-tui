@@ -6,6 +6,7 @@ remota, rate_song, playlists remotas) são intencionalmente omitidas — com
 o cliente anônimo o ytmusicapi responde ``YTMusicUserError: Please provide
 authentication``. A biblioteca do app é local (SQLite).
 """
+
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,7 @@ from ytmusicapi import YTMusic
 @dataclass
 class SearchResult:
     """Resultado de busca padronizado."""
+
     tracks: list[dict[str, Any]]
     artists: list[dict[str, Any]]
     albums: list[dict[str, Any]]
@@ -98,24 +100,14 @@ class YTMusicAPI:
         client = self.client
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            tracks_future = pool.submit(
-                client.search, query, filter="songs", limit=songs_limit
-            )
-            albums_future = pool.submit(
-                client.search, query, filter="albums", limit=albums_limit
-            )
+            tracks_future = pool.submit(client.search, query, filter="songs", limit=songs_limit)
+            albums_future = pool.submit(client.search, query, filter="albums", limit=albums_limit)
             songs = tracks_future.result()
             albums = albums_future.result()
 
-        tracks = [
-            s for s in songs if s.get("resultType") == "song" and s.get("videoId")
-        ]
-        albums = [
-            a for a in albums if a.get("resultType") == "album" and a.get("browseId")
-        ]
-        return SearchResult(
-            tracks=tracks, artists=[], albums=albums, playlists=[], videos=[]
-        )
+        tracks = [s for s in songs if s.get("resultType") == "song" and s.get("videoId")]
+        albums = [a for a in albums if a.get("resultType") == "album" and a.get("browseId")]
+        return SearchResult(tracks=tracks, artists=[], albums=albums, playlists=[], videos=[])
 
     def get_song(self, video_id: str) -> dict[str, Any]:
         """Obtém detalhes completos de uma música."""

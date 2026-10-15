@@ -1,4 +1,5 @@
 """Configuração centralizada da aplicação."""
+
 import json
 import os
 from pathlib import Path

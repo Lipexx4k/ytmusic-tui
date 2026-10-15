@@ -1,4 +1,5 @@
 """Gerenciador do banco de dados da biblioteca local."""
+
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path

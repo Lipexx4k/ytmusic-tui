@@ -1,4 +1,5 @@
 """Testes para o wrapper da API em modo anônimo (sem login)."""
+
 import pytest
 
 import ytmusic_tui.api as api_module

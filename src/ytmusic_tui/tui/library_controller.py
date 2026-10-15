@@ -1,4 +1,5 @@
 """Aba 📚 da biblioteca local (mixin de ``MainScreen``)."""
+
 import logging
 
 from rich.markup import escape
@@ -14,8 +15,7 @@ logger = logging.getLogger(__name__)
 # Texto padrão da aba Biblioteca quando não há faixas carregadas (usado
 # também para restaurá-lo depois de uma falha de carregamento).
 LIBRARY_EMPTY_TEXT = (
-    "Nenhuma faixa na biblioteca local ainda.\n"
-    "Baixe músicas com Ctrl+D durante a reprodução."
+    "Nenhuma faixa na biblioteca local ainda.\nBaixe músicas com Ctrl+D durante a reprodução."
 )
 
 

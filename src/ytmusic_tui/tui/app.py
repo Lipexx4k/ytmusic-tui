@@ -10,6 +10,7 @@ A estrutura da TUI é dividida em módulos:
 Este módulo fica com a classe ``YTMusicTUI`` (ciclo de vida do app) e o
 ponto de entrada ``main()``.
 """
+
 import contextlib
 import logging
 import threading

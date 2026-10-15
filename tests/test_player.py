@@ -1,4 +1,5 @@
 """Testes para o player mpv (lógica sem depender de rede/áudio)."""
+
 import locale
 import shutil
 import sys

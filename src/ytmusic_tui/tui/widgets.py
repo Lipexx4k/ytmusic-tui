@@ -1,4 +1,5 @@
 """Widgets personalizados usados pelas telas da TUI."""
+
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -49,6 +50,7 @@ class TrackListView(AutoHighlightListView):
 
 class SearchInput(Input):
     """Input de busca com placeholder."""
+
     def __init__(self, **kwargs):
         super().__init__(placeholder="🔍 Buscar músicas, artistas, álbuns...", **kwargs)
 
@@ -97,9 +99,7 @@ class AlbumListView(AutoHighlightListView):
         self.clear()
         for album in self.albums:
             artists = ", ".join(
-                a.get("name", "")
-                for a in (album.get("artists") or [])
-                if isinstance(a, dict)
+                a.get("name", "") for a in (album.get("artists") or []) if isinstance(a, dict)
             )
             title = album.get("title", "?")
             kind = album.get("type") or "Álbum"

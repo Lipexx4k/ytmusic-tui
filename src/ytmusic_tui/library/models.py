@@ -1,4 +1,5 @@
 """Modelos do banco de dados da biblioteca local."""
+
 from datetime import UTC, datetime
 from enum import Enum as PyEnum
 
@@ -31,6 +32,7 @@ def utcnow() -> datetime:
 
 class TrackSource(PyEnum):
     """Origem da faixa na biblioteca."""
+
     YOUTUBE_MUSIC = "youtube_music"
     LOCAL_FILE = "local_file"
     DOWNLOADED = "downloaded"
@@ -140,9 +142,7 @@ class Track(Base):
     # Relacionamentos
     album_id = Column(Integer, ForeignKey("albums.id", ondelete="SET NULL"), index=True)
     album = relationship("Album", back_populates="tracks")
-    artists = relationship(
-        "TrackArtist", back_populates="track", cascade="all, delete-orphan"
-    )
+    artists = relationship("TrackArtist", back_populates="track", cascade="all, delete-orphan")
     playlist_entries = relationship(
         "PlaylistTrack", back_populates="track", cascade="all, delete-orphan"
     )
@@ -200,9 +200,7 @@ class Playlist(Base):
     # Relacionamentos
     tracks = relationship("PlaylistTrack", back_populates="playlist", cascade="all, delete-orphan")
 
-    __table_args__ = (
-        UniqueConstraint("source_id", "source", name="uq_playlist_source"),
-    )
+    __table_args__ = (UniqueConstraint("source_id", "source", name="uq_playlist_source"),)
 
     def __repr__(self):
         return f"<Playlist(id={self.id}, name='{self.name}', source='{self.source.value}')>"
@@ -220,9 +218,7 @@ class PlaylistTrack(Base):
     playlist = relationship("Playlist", back_populates="tracks")
     track = relationship("Track", back_populates="playlist_entries")
 
-    __table_args__ = (
-        Index("ix_playlist_track_position", "playlist_id", "position"),
-    )
+    __table_args__ = (Index("ix_playlist_track_position", "playlist_id", "position"),)
 
 
 class PlaybackHistory(Base):
@@ -237,9 +233,7 @@ class PlaybackHistory(Base):
 
     track = relationship("Track")
 
-    __table_args__ = (
-        Index("ix_history_track_played", "track_id", "played_at"),
-    )
+    __table_args__ = (Index("ix_history_track_played", "track_id", "played_at"),)
 
 
 class UserSettings(Base):

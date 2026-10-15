@@ -1,4 +1,5 @@
 """Tela principal da TUI: abas, atalhos e navegação."""
+
 import asyncio
 import contextlib
 from pathlib import Path
@@ -141,12 +142,16 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
                             value=str(settings.mpv_volume), id="setting-volume", type="integer"
                         )
                         yield Static("Qualidade de áudio:")
-                        yield Select([
-                            ("Baixa", "low"),
-                            ("Média", "medium"),
-                            ("Alta", "high"),
-                            ("Melhor", "best"),
-                        ], value=settings.mpv_audio_quality, id="setting-audio-quality")
+                        yield Select(
+                            [
+                                ("Baixa", "low"),
+                                ("Média", "medium"),
+                                ("Alta", "high"),
+                                ("Melhor", "best"),
+                            ],
+                            value=settings.mpv_audio_quality,
+                            id="setting-audio-quality",
+                        )
                     with Collapsible(title="Downloads", collapsed=True):
                         yield Static("Diretório:")
                         yield Input(value=str(settings.download_dir), id="setting-download-dir")

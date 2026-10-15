@@ -1,4 +1,5 @@
 """Serviço de alto nível para operações da biblioteca local."""
+
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +63,9 @@ class LibraryService:
                     .where(Artist.name.ilike(f"%{query}%"))
                     .order_by(Artist.name)
                     .limit(limit)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def get_artist(self, artist_id: int) -> Artist | None:
@@ -128,7 +131,9 @@ class LibraryService:
                     .where(Album.title.ilike(f"%{query}%"))
                     .order_by(Album.title)
                     .limit(limit)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def get_album_with_tracks(self, album_id: int) -> Album | None:
@@ -234,7 +239,9 @@ class LibraryService:
                 select(Track)
                 .options(
                     selectinload(Track.artists).selectinload(TrackArtist.artist),
-                    selectinload(Track.album).selectinload(Album.artists).selectinload(AlbumArtist.artist),
+                    selectinload(Track.album)
+                    .selectinload(Album.artists)
+                    .selectinload(AlbumArtist.artist),
                 )
                 .where(Track.id == track_id)
             ).scalar_one_or_none()
@@ -252,7 +259,9 @@ class LibraryService:
                 select(Track)
                 .options(
                     selectinload(Track.artists).selectinload(TrackArtist.artist),
-                    selectinload(Track.album).selectinload(Album.artists).selectinload(AlbumArtist.artist),
+                    selectinload(Track.album)
+                    .selectinload(Album.artists)
+                    .selectinload(AlbumArtist.artist),
                 )
                 .where(Track.source_id == source_id, Track.source == source)
             ).scalar_one_or_none()
@@ -271,7 +280,9 @@ class LibraryService:
                     .order_by(desc(Track.added_at))
                     .limit(limit)
                     .offset(offset)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def get_downloaded_tracks(self, limit: int = 100, offset: int = 0) -> list[Track]:
@@ -288,7 +299,9 @@ class LibraryService:
                     .order_by(desc(Track.added_at))
                     .limit(limit)
                     .offset(offset)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def get_recent_tracks(self, limit: int = 50) -> list[Track]:
@@ -303,7 +316,9 @@ class LibraryService:
                     )
                     .order_by(desc(Track.added_at))
                     .limit(limit)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def toggle_like(self, track_id: int) -> bool:
@@ -426,10 +441,10 @@ class LibraryService:
         with self.db.session() as session:
             return list(
                 session.execute(
-                    select(Playlist)
-                    .where(Playlist.is_system.is_(False))
-                    .order_by(Playlist.name)
-                ).scalars().all()
+                    select(Playlist).where(Playlist.is_system.is_(False)).order_by(Playlist.name)
+                )
+                .scalars()
+                .all()
             )
 
     def add_track_to_playlist(self, playlist_id: int, track_id: int, position: int = -1) -> bool:
@@ -442,11 +457,14 @@ class LibraryService:
 
             if position < 0:
                 # Adicionar no final
-                max_pos = session.execute(
-                    select(func.max(PlaylistTrack.position)).where(
-                        PlaylistTrack.playlist_id == playlist_id
-                    )
-                ).scalar() or 0
+                max_pos = (
+                    session.execute(
+                        select(func.max(PlaylistTrack.position)).where(
+                            PlaylistTrack.playlist_id == playlist_id
+                        )
+                    ).scalar()
+                    or 0
+                )
                 position = max_pos + 1
             else:
                 # Deslocar faixas existentes
@@ -543,7 +561,9 @@ class LibraryService:
                     .join(subquery, Track.id == subquery.c.track_id)
                     .order_by(desc(subquery.c.last_played))
                     .limit(limit)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     def get_most_played(self, limit: int = 50) -> list[Track]:
@@ -559,7 +579,9 @@ class LibraryService:
                     .where(Track.play_count > 0)
                     .order_by(desc(Track.play_count))
                     .limit(limit)
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     # ===== Configurações do usuário =====

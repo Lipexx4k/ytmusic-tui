@@ -4,6 +4,7 @@ Permite iniciar a aplicação via console script (``ytmusic-tui``), com
 ``python -m ytmusic_tui`` ou ``python main.py``. Delega para
 :func:`ytmusic_tui.tui.app.main`.
 """
+
 import sys
 
 

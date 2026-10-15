@@ -1,4 +1,5 @@
 """Testes do logging em arquivo (nunca no stderr, que sujaria a TUI)."""
+
 import logging
 
 import ytmusic_tui.log as log_module

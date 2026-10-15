@@ -9,6 +9,7 @@ Cobrem as regressões encontradas na revisão de código:
 - cancelamento via ``abort_event`` (``future.cancel()`` não interrompia nada);
 - nomes de arquivo limitados para não estourar ENAMETOOLONG.
 """
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -161,9 +162,7 @@ def test_download_task_completes_with_final_path(manager, monkeypatch, tmp_path)
         lambda *args, **kwargs: updates.append(args),
     )
 
-    task = manager.queue_download(
-        video_id="abc", title="T", artist="A", album="Alb", track_id=7
-    )
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb", track_id=7)
     result = manager._download_task(task)
 
     assert result.status == DownloadStatus.COMPLETED

@@ -8,6 +8,7 @@ Eles não entram no CI: existem para checar, quando desejado, se o que os mocks
 prometem continua batendo com o serviço real (busca, álbuns e os campos que a
 TUI usa: ``videoId``, ``browseId`` e ``isAvailable``).
 """
+
 import os
 
 import pytest

@@ -1,4 +1,5 @@
 """Testes para o serviço da biblioteca."""
+
 import tempfile
 from pathlib import Path
 
@@ -51,8 +52,7 @@ def test_create_album_with_artist(library_service):
             session, "UC123", "Test Artist", TrackSource.YOUTUBE_MUSIC
         )
         album = library_service.get_or_create_album(
-            session, "ALB123", "Test Album", TrackSource.YOUTUBE_MUSIC,
-            release_year=2024
+            session, "ALB123", "Test Album", TrackSource.YOUTUBE_MUSIC, release_year=2024
         )
         library_service.link_album_artist(session, album, artist)
 
@@ -66,7 +66,7 @@ def test_create_track_with_artist_and_album(library_service):
     """Testa criação de faixa com artista e álbum."""
     track_id = None
     album_id = None
-    
+
     with library_service.db.session() as session:
         artist = library_service.get_or_create_artist(
             session, "UC123", "Test Artist", TrackSource.YOUTUBE_MUSIC
@@ -78,8 +78,7 @@ def test_create_track_with_artist_and_album(library_service):
         library_service.link_album_artist(session, album, artist)
 
         track = library_service.get_or_create_track(
-            session, "VID123", "Test Track", TrackSource.YOUTUBE_MUSIC,
-            duration_seconds=180
+            session, "VID123", "Test Track", TrackSource.YOUTUBE_MUSIC, duration_seconds=180
         )
         track_id = track.id
         library_service.link_track_artist(session, track, artist)

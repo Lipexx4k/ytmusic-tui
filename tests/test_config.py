@@ -1,4 +1,5 @@
 """Testes para configuração."""
+
 import tomllib
 from pathlib import Path
 

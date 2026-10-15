@@ -1,4 +1,5 @@
 """Fila de reprodução e ações do player (mixin de ``MainScreen``)."""
+
 import time
 
 from ytmusic_tui.config import settings

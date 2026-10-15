@@ -1,4 +1,5 @@
 """Player de áudio usando mpv (biblioteca libmpv via python-mpv)."""
+
 import contextlib
 import locale
 import shutil
@@ -26,6 +27,7 @@ class PlayerState(Enum):
 @dataclass
 class TrackInfo:
     """Informações da faixa em reprodução."""
+
     video_id: str = ""
     title: str = ""
     artist: str = ""
@@ -39,6 +41,7 @@ class TrackInfo:
 @dataclass
 class PlayerEvent:
     """Evento do player."""
+
     event: str
     data: dict[str, Any] = field(default_factory=dict)
 
