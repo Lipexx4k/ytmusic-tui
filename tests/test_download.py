@@ -17,6 +17,12 @@ E a máquina de estados da T02 (§4 do plano):
 - ``shutdown`` não bloqueia, marca INTERRUPTED e não deixa thread viva;
 - CANCELLED nunca vira COMPLETED (corrida cancelar × worker, §4.4);
 - falha ao validar/registrar o arquivo vira FAILED (nunca sucesso falso).
+
+E o pipeline de publicação do T03 (§5.1–§5.2):
+- disco cheio, conversão falha e temporário ausente → FAILED, nada publicado;
+- destino existente (Q2a): válido → importa/registra sem baixar; inválido →
+  FAILED sem apagar nada (nunca sobrescreve);
+- reserva ocupada por outra tarefa → FAILED (exclusividade em disco).
 """
 
 import asyncio
@@ -28,7 +34,9 @@ from types import SimpleNamespace
 import pytest
 
 import ytmusic_tui.download as download_mod
+import ytmusic_tui.download.pipeline as pipeline_mod
 from ytmusic_tui.download import DownloadStatus, DownloadTask
+from ytmusic_tui.download.pipeline import release, reserve
 
 
 class _FakeDownloadError(Exception):
@@ -287,6 +295,8 @@ def test_download_task_completes_with_final_path(manager, monkeypatch, tmp_path)
     # Registro na biblioteca com o caminho final
     assert updates and updates[0][0] == 7
     assert updates[0][1] == result.file_path
+    # Reserva/temporário não deixam sobras (§5.2)
+    assert list((tmp_path / ".tmp").iterdir()) == []
 
 
 def test_progress_hook_does_not_complete_prematurely(manager):
@@ -643,7 +653,7 @@ async def test_cancelled_never_becomes_completed(manager, monkeypatch):
     assert task.status is DownloadStatus.CANCELLED  # nunca COMPLETED
 
 
-def test_library_update_failure_marks_failed_not_completed(manager, monkeypatch):
+def test_library_update_failure_marks_failed_not_completed(manager, monkeypatch, tmp_path):
     """Falha ao registrar na biblioteca → FAILED (nunca sucesso falso)."""
 
     def _boom(*args, **kwargs):
@@ -656,13 +666,15 @@ def test_library_update_failure_marks_failed_not_completed(manager, monkeypatch)
 
     assert result.status is DownloadStatus.FAILED
     assert "biblioteca" in result.error
-    # O arquivo permanece no disco sem registro (risco §1.3 documentado): a
-    # reconciliação/quarentena é T03/T04 — aqui garantimos que a tarefa NÃO
-    # termina COMPLETED.
-    assert result.file_path is not None and result.file_path.exists()
+    # O arquivo FOI publicado (ordem do §5.1) e permanece no disco sem
+    # registro — "arquivo sem registro" é recuperável pela reconciliação
+    # (§5.3/T03); o que não pode é a tarefa terminar COMPLETED.
+    final = tmp_path / "A" / "Alb" / "T - A.mp3"
+    assert result.file_path == final
+    assert final.exists()
 
 
-def test_missing_final_file_fails_validation(manager, monkeypatch):
+def test_missing_final_file_fails_validation(manager, monkeypatch, tmp_path):
     """VALIDAÇÃO mínima: sem post_hook (arquivo não capturado) → FAILED."""
 
     def _download_without_post_hook(self, urls):
@@ -675,9 +687,11 @@ def test_missing_final_file_fails_validation(manager, monkeypatch):
 
     assert result.status is DownloadStatus.FAILED
     assert "ausente" in result.error
+    # Nada publicado e nenhum temporário deixado para trás
+    assert list((tmp_path / ".tmp").iterdir()) == []
 
 
-def test_empty_final_file_fails_validation(manager, monkeypatch):
+def test_empty_final_file_fails_validation(manager, monkeypatch, tmp_path):
     """VALIDAÇÃO mínima: arquivo final vazio → FAILED (nunca COMPLETED)."""
 
     def _download_producing_empty_file(self, urls):
@@ -693,7 +707,141 @@ def test_empty_final_file_fails_validation(manager, monkeypatch):
     result = manager._download_task(task)
 
     assert result.status is DownloadStatus.FAILED
-    assert result.file_path is not None and result.file_path.exists()
+    assert "vazio" in result.error
+    # O temporário vazio é descartado na limpeza da reserva: nada publicado.
+    assert result.file_path is not None and not result.file_path.exists()
+    assert list((tmp_path / ".tmp").iterdir()) == []
+
+
+def test_download_fails_on_disk_full_and_cleans_temp(manager, monkeypatch, tmp_path):
+    """§5.4: disco cheio na publicação → FAILED, nada publicado, sem sobras."""
+
+    def _full(_src, _dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(pipeline_mod.os, "replace", _full)
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert "publicação" in result.error
+    assert not (tmp_path / "A" / "Alb" / "T - A.mp3").exists()
+    assert list((tmp_path / ".tmp").iterdir()) == []
+
+
+def test_download_fails_when_conversion_fails(manager, monkeypatch, tmp_path):
+    """§5.4: falha na conversão (código ≠ 0) → FAILED e nada publicado."""
+
+    def _ffmpeg_fails(self, urls):
+        template = self.opts["outtmpl"]
+        intermediate = Path(template.replace("%(ext)s", "webm"))
+        intermediate.parent.mkdir(parents=True, exist_ok=True)
+        intermediate.write_bytes(b"audio-original")
+        raise _FakeDownloadError("ffmpeg falhou (código 1)")
+
+    monkeypatch.setattr(_FakeYoutubeDL, "download", _ffmpeg_fails)
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert "ffmpeg" in result.error
+    assert not (tmp_path / "A").exists()
+    assert list((tmp_path / ".tmp").iterdir()) == []
+
+
+def test_download_fails_when_temp_vanishes_before_publish(manager, monkeypatch, tmp_path):
+    """§5.4: temporário ausente na hora de publicar → FAILED."""
+
+    def _vanishing(self, urls):
+        template = self.opts["outtmpl"]
+        temp = Path(template.replace("%(ext)s", "mp3"))
+        temp.parent.mkdir(parents=True, exist_ok=True)
+        temp.write_bytes(b"audio")
+        temp.unlink()  # sumiu entre o post_hook e a publicação
+        for hook in self.opts.get("post_hooks", []):
+            hook(str(temp))
+
+    monkeypatch.setattr(_FakeYoutubeDL, "download", _vanishing)
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert "ausente" in result.error
+    assert not (tmp_path / "A").exists()
+
+
+def test_existing_valid_file_is_adopted_not_downloaded(manager, monkeypatch, tmp_path):
+    """§5.4 (Q2a, caso válido): arquivo existe → não baixa, registra e conclui."""
+
+    def _bomb(self, urls):
+        raise AssertionError("não deveria baixar: o arquivo já existe")
+
+    monkeypatch.setattr(_FakeYoutubeDL, "download", _bomb)
+    ensures: list[dict] = []
+    updates: list[tuple] = []
+    monkeypatch.setattr(
+        download_mod.library, "ensure_track", lambda **kwargs: ensures.append(kwargs) or 9
+    )
+    monkeypatch.setattr(
+        download_mod.library, "update_track_file", lambda *args, **kwargs: updates.append(args)
+    )
+
+    final = tmp_path / "A" / "Alb" / "T - A.mp3"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"audio-do-usuario")
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.COMPLETED
+    assert final.read_bytes() == b"audio-do-usuario"  # nunca sobrescreve
+    assert result.file_path == final
+    # Registro garantido: faixa criada (ensure_track) se faltar e arquivo vinculado
+    assert ensures and ensures[0]["artist"] == "A" and ensures[0]["album"] == "Alb"
+    # bitrate 0 no import: desconhecido sem reanalisar o arquivo
+    assert updates and updates[0] == (9, final, len(b"audio-do-usuario"), "mp3", 0)
+
+
+def test_existing_invalid_file_fails_without_overwrite(manager, monkeypatch, tmp_path):
+    """§5.4 (Q2a, caso inválido): arquivo 0 byte → FAILED, nada é apagado."""
+
+    def _bomb(self, urls):
+        raise AssertionError("não deveria baixar: o arquivo já existe")
+
+    monkeypatch.setattr(_FakeYoutubeDL, "download", _bomb)
+
+    final = tmp_path / "A" / "Alb" / "T - A.mp3"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"")
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert "inválido" in result.error
+    assert final.exists() and final.stat().st_size == 0  # intocado
+
+
+def test_second_task_for_same_destination_fails_busy(manager, monkeypatch, tmp_path):
+    """§5.4: duas tarefas para o mesmo arquivo — a segunda é recusada (reserva)."""
+
+    def _bomb(self, urls):
+        raise AssertionError("não deveria baixar: a reserva é da outra tarefa")
+
+    monkeypatch.setattr(_FakeYoutubeDL, "download", _bomb)
+
+    final = tmp_path / "A" / "Alb" / "T - A.mp3"
+    reservation = reserve(final, tmp_path)
+    try:
+        task = manager.queue_download(video_id="b", title="T", artist="A", album="Alb")
+        result = manager._download_task(task)
+
+        assert result.status is DownloadStatus.FAILED
+        assert "Outra tarefa" in result.error
+        assert not final.exists()
+    finally:
+        release(reservation)
 
 
 if __name__ == "__main__":

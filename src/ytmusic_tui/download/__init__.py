@@ -9,6 +9,19 @@ from typing import Any
 
 from ytmusic_tui.config import settings
 
+# Pipeline de disco (§5.1/T03): validação, reserva, publicação e fsync.
+from ytmusic_tui.download.pipeline import (
+    DestinationBusy,
+    InvalidInputError,
+    MediaValidationError,
+    PipelineError,
+    publish_file,
+    release,
+    reserve,
+    validate_input,
+    validate_media_file,
+)
+
 # Estados e máquina de transições vivem em `task.py` (T02) e são
 # re-exportados aqui para os imports existentes (TUI, testes).
 from ytmusic_tui.download.task import (
@@ -100,9 +113,13 @@ class DownloadManager:
             return str(settings.download_dir / artist / album / f"{stem}.%(ext)s")
         return str(settings.download_dir / artist / f"{stem}.%(ext)s")
 
-    def _get_ydl_options(self, task: DownloadTask) -> dict[str, Any]:
-        """Opções do yt-dlp para download."""
-        output_template = self._get_output_template(task)
+    def _get_ydl_options(self, task: DownloadTask, outtmpl: str | None = None) -> dict[str, Any]:
+        """Opções do yt-dlp para download.
+
+        ``outtmpl`` permite apontar a saída para o temporário da reserva
+        (§5.1/T03); sem ele, usa o template final (compatibilidade).
+        """
+        output_template = outtmpl if outtmpl is not None else self._get_output_template(task)
 
         # Formato de áudio
         format_map = {
@@ -208,22 +225,71 @@ class DownloadManager:
             # está por vir — o status final é definido em _download_task.
             task.progress = 100.0
 
-    def _validated_final_path(self, task: DownloadTask) -> Path | None:
-        """Caminho final validado (existe e não está vazio) ou ``None``.
+    def _final_path_for(self, task: DownloadTask) -> Path:
+        """Caminho final publicado (extensão = formato configurado)."""
+        return Path(self._get_output_template(task).replace("%(ext)s", settings.download_format))
 
-        Validação mínima do T02: a completa (extensão == formato, tamanho
-        plausível, temporário→destino, anti-sobrescrita) é o pipeline de T03
-        — mas sem esta checagem barata o app poderia declarar sucesso falso
-        (INV-1; §4.2 "arquivo existe, não vazio").
+    def _configured_bitrate(self) -> int:
+        """Bitrate da configuração (fallback 320 quando não numérico)."""
+        return int(settings.download_quality) if settings.download_quality.isdigit() else 320
+
+    def _register_track_file(self, task: DownloadTask, final_path: Path, *, bitrate: int) -> None:
+        """Registra o arquivo publicado na biblioteca (passo 7 do §5.1).
+
+        ``bitrate=0`` no caminho de import (Q2(a)/reconciliação): o valor é
+        desconhecido sem reanalisar o arquivo, mas ``update_track_file``
+        exige o argumento — zero fica documentado como "desconhecido".
         """
-        path = task.file_path
-        if path is None:
-            return None
+        track_id = task.track_id
+        if not track_id:
+            track_id = (
+                library.ensure_track(
+                    source_id=task.video_id,
+                    title=task.title,
+                    artist=task.artist,
+                    album=task.album,
+                    thumbnail_url=task.thumbnail_url,
+                )
+                or 0
+            )
+            task.track_id = track_id
+        if not track_id:
+            raise RuntimeError("não foi possível criar a faixa na biblioteca")
+        library.update_track_file(
+            track_id,
+            final_path,
+            final_path.stat().st_size,
+            settings.download_format,
+            bitrate,
+        )
+
+    def _adopt_existing_file(self, task: DownloadTask, final_path: Path) -> DownloadTask:
+        """Política Q2(a): arquivo já existe → não baixa; valida e registra.
+
+        Nunca sobrescreve: o existente precisa passar na validação (§5.1,
+        passo 5) para ser registrado; inválido → ``FAILED`` com mensagem
+        clara. ``COMPLETED`` só com arquivo válido **e** registro feito.
+        """
         try:
-            return path if path.is_file() and path.stat().st_size > 0 else None
-        except OSError:
-            # Ilegível/inacessível conta como inválido (VALIDATING → FAILED).
-            return None
+            validate_media_file(final_path, settings.download_format)
+        except MediaValidationError as e:
+            logger.warning("Arquivo existente inválido em %s: %s", final_path, e)
+            self._set_failed(task, f"Arquivo existente inválido: {e}")
+            return task
+
+        task.file_path = final_path
+        task.progress = 100.0
+        try:
+            self._register_track_file(task, final_path, bitrate=0)
+        except Exception as e:
+            logger.exception("Falha ao registrar arquivo existente de %s na biblioteca", task.id)
+            self._set_failed(task, f"Falha ao registrar na biblioteca: {e}")
+            return task
+
+        if not task.can_transition_to(DownloadStatus.COMPLETED):
+            return task
+        task.transition_to(DownloadStatus.COMPLETED)
+        return task
 
     @staticmethod
     def _set_failed(task: DownloadTask, error: str) -> None:
@@ -244,67 +310,106 @@ class DownloadManager:
             task.transition_to(DownloadStatus.CANCELLED)
 
     def _download_task(self, task: DownloadTask) -> DownloadTask:
-        """Executa o download em thread separada, por transições da §4.2."""
+        """Executa o download em thread separada, pela ordem do §5.1 (T03).
+
+        ``COMPLETED`` só depois de publicar (6) e registrar (7); qualquer
+        falha vira ``FAILED`` — nunca sucesso falso (INV-1). As guardas de
+        corrida do T02 (cancelamento/encerramento) continuam valendo antes
+        de cada transição.
+        """
         # Cancelada na fila ou interrompida pelo shutdown antes de começar:
         # o estado final já existe — o worker apenas encerra.
         if not task.can_transition_to(DownloadStatus.RUNNING):
             return task
         task.transition_to(DownloadStatus.RUNNING)
 
-        yt_dlp = _load_yt_dlp()
-        url = f"https://music.youtube.com/watch?v={task.video_id}"
+        download_dir = settings.download_dir
+        try:
+            final_path = self._final_path_for(task)
+            validate_input(
+                video_id=task.video_id,
+                audio_format=settings.download_format,
+                final_path=final_path,
+                download_dir=download_dir,
+            )
+        except InvalidInputError as e:
+            logger.warning("Entrada inválida para %s: %s", task.id, e)
+            self._set_failed(task, f"Entrada inválida: {e}")
+            return task
+
+        # Q2(a): destino já existe → não baixa; valida e registra o existente.
+        if final_path.exists():
+            if not task.can_transition_to(DownloadStatus.VALIDATING):
+                return task
+            task.transition_to(DownloadStatus.VALIDATING)
+            return self._adopt_existing_file(task, final_path)
 
         try:
-            with yt_dlp.YoutubeDL(self._get_ydl_options(task)) as ydl:
-                ydl.download([url])
-        except Exception as e:
-            if task.abort_event.is_set():
-                # Cancelamento (usuário) ou encerramento (shutdown): quem
-                # sinalizou marca o estado; aqui só fechamos se ninguém fechou.
-                self._finish_cancelled(task)
-            elif isinstance(e, yt_dlp.utils.DownloadError):
-                self._set_failed(task, str(e))
-            else:
-                logger.exception(
-                    "Erro inesperado no download %s (vídeo %s)", task.id, task.video_id
-                )
-                self._set_failed(task, f"Erro inesperado: {e}")
+            reservation = reserve(final_path, download_dir)
+        except DestinationBusy as e:
+            logger.info("Destino já reservado por outra tarefa (%s): %s", task.id, e)
+            self._set_failed(task, "Outra tarefa já está baixando para este arquivo")
             return task
 
-        # yt-dlp terminou sem exceção. Corrida conhecida: um cancelamento/
-        # encerramento entre o fim do yt-dlp e a validação já definiu o
-        # estado final — nunca sobrescrever (CANCELLED ≠ COMPLETED, §4.4).
-        if not task.can_transition_to(DownloadStatus.VALIDATING):
-            return task
-        task.transition_to(DownloadStatus.VALIDATING)
+        try:
+            yt_dlp = _load_yt_dlp()
+            url = f"https://music.youtube.com/watch?v={task.video_id}"
 
-        final_path = self._validated_final_path(task)
-        if final_path is None:
-            self._set_failed(task, "Arquivo final ausente ou vazio após o download")
-            return task
-
-        if task.track_id:
             try:
-                library.update_track_file(
-                    task.track_id,
-                    final_path,
-                    final_path.stat().st_size,
-                    settings.download_format,
-                    int(settings.download_quality) if settings.download_quality.isdigit() else 320,
-                )
+                with yt_dlp.YoutubeDL(
+                    self._get_ydl_options(task, reservation.temp_template)
+                ) as ydl:
+                    ydl.download([url])
             except Exception as e:
-                # O arquivo fica no disco sem registro (risco §1.3): falha
-                # explícita, nunca COMPLETED; a reconciliação/quarentena do
-                # arquivo órfão é T03/T04.
+                if task.abort_event.is_set():
+                    # Cancelamento (usuário) ou encerramento (shutdown): quem
+                    # sinalizou marca o estado; aqui só fechamos se ninguém fechou.
+                    self._finish_cancelled(task)
+                elif isinstance(e, yt_dlp.utils.DownloadError):
+                    self._set_failed(task, str(e))
+                else:
+                    logger.exception(
+                        "Erro inesperado no download %s (vídeo %s)", task.id, task.video_id
+                    )
+                    self._set_failed(task, f"Erro inesperado: {e}")
+                return task
+
+            # Corrida conhecida: cancelamento/encerramento entre o fim do
+            # yt-dlp e a validação já definiu o estado final — não sobrescrever.
+            if not task.can_transition_to(DownloadStatus.VALIDATING):
+                return task
+            task.transition_to(DownloadStatus.VALIDATING)
+
+            try:
+                temp = validate_media_file(task.file_path, settings.download_format)
+                publish_file(temp, final_path)
+            except (PipelineError, OSError) as e:
+                logger.warning("Publicação falhou para %s: %s", task.id, e)
+                self._set_failed(task, f"Falha na publicação: {e}")
+                return task
+            except Exception as e:
+                logger.exception("Erro inesperado na publicação de %s", task.id)
+                self._set_failed(task, f"Erro inesperado na publicação: {e}")
+                return task
+
+            # Publicado: o ``file_path`` da tarefa passa a ser o destino final.
+            task.file_path = final_path
+
+            try:
+                self._register_track_file(task, final_path, bitrate=self._configured_bitrate())
+            except Exception as e:
+                # Arquivo publicado sem registro (risco §1.3): falha explícita,
+                # nunca COMPLETED; a reconciliação (§5.3/T03) importa o órfão.
                 logger.exception("Falha ao registrar %s na biblioteca", task.id)
                 self._set_failed(task, f"Falha ao registrar na biblioteca: {e}")
                 return task
 
-        if not task.can_transition_to(DownloadStatus.COMPLETED):
-            # Interrompida durante a validação (ex.: shutdown): já é terminal.
+            if not task.can_transition_to(DownloadStatus.COMPLETED):
+                return task
+            task.transition_to(DownloadStatus.COMPLETED)
             return task
-        task.transition_to(DownloadStatus.COMPLETED)
-        return task
+        finally:
+            release(reservation)
 
     async def download(self, task: DownloadTask) -> DownloadTask:
         """Inicia download assíncrono."""
