@@ -4,6 +4,14 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
 O formato segue livremente o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Corrigido
+
+- Nomes de arquivo com muitos caracteres multibyte (acentos, CJK, emoji)
+  agora são cortados também por bytes (limite de 255 bytes por componente do
+  filesystem), evitando falha do download por nome longo
+
 ## [0.1.1] - 2026-10-15
 
 ### Adicionado

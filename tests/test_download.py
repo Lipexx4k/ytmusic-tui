@@ -127,6 +127,31 @@ def test_output_template_limits_component_length(manager):
     assert len(filename) <= 180  # título(100) + ' - ' + artista(60) + ext
 
 
+def test_output_template_truncates_multibyte_by_bytes(manager, tmp_path):
+    """O limite do filesystem é em bytes: título CJK/emoji não pode estourar.
+
+    ENAMETOOLONG acontece a partir de 255 bytes por componente; um corte
+    apenas por caracteres passa longe disso com multibyte (100 CJK = 300
+    bytes).
+    """
+    task = DownloadTask(
+        video_id="abc",
+        title="音" * 500,
+        artist="🎵" * 500,
+        album="歌" * 500,
+    )
+    template = manager._get_output_template(task)
+    assert "\ufffd" not in template  # nenhum caractere quebrado no meio
+
+    rel = Path(template).relative_to(tmp_path)
+    for part in rel.parts[:-1]:  # diretórios (artista/álbum)
+        assert len(part.encode("utf-8")) <= 255
+    # O arquivo ainda precisa caber com extensão (.flac), capa (.webp) e o
+    # sufixo de download parcial do yt-dlp (.part)
+    final = rel.parts[-1].replace("%(ext)s", "flac")
+    assert len(final.encode("utf-8")) + len(".part") <= 255
+
+
 def test_download_task_completes_with_final_path(manager, monkeypatch, tmp_path):
     """O task deve terminar COMPLETED com o caminho pós-conversão."""
     updates: list[tuple] = []

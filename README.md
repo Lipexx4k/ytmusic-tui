@@ -10,7 +10,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **60 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **61 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -288,7 +288,7 @@ ou anexar a uma issue.
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 60 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 61 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -311,7 +311,7 @@ ytmusic-tui/
 │       ├── screens.py         # MainScreen: abas, atalhos e navegação
 │       ├── widgets.py         # Widgets personalizados (listas, barra do player)
 │       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
-└── tests/                     # 60 testes offline (pytest) + integração opt-in
+└── tests/                     # 61 testes offline (pytest) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento
@@ -334,8 +334,8 @@ python3 -m venv .venv
 # Testes de integração (falam com o YouTube Music de verdade; desabilitados por padrão)
 YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
 
-# Auditoria de vulnerabilidades das dependências (opcional)
-.venv/bin/pip install pip-audit && .venv/bin/pip-audit
+# Auditoria de vulnerabilidades das dependências (também roda no CI)
+.venv/bin/pip-audit --skip-editable
 ```
 
 Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.

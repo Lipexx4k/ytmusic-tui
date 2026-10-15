@@ -26,6 +26,19 @@ def _load_yt_dlp():
     return _yt_dlp_module
 
 
+def _truncate_bytes(name: str, max_bytes: int) -> str:
+    """Corta ``name`` para caber em ``max_bytes`` (UTF-8) sem quebrar caractere.
+
+    O limite de 255 bytes por componente de caminho (ext4, APFS, NTFS...)
+    conta bytes, não caracteres: 100 caracteres CJK ocupam 300 bytes, então
+    um corte apenas por caracteres não basta para nomes multibyte.
+    """
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return name
+    return encoded[:max_bytes].decode("utf-8", errors="ignore").strip(" .")
+
+
 class DownloadStatus(Enum):
     PENDING = "pending"
     DOWNLOADING = "downloading"
@@ -75,16 +88,22 @@ class DownloadManager:
 
     def _get_output_template(self, task: DownloadTask) -> str:
         """Gera template de saída para yt-dlp."""
-        # Limites conservadores para não estourar o máximo de 255 bytes
-        # por componente do caminho em sistemas de arquivos comuns.
+        # Limites conservadores para não estourar o máximo de 255 bytes por
+        # componente do caminho em sistemas de arquivos comuns. O limite é
+        # em BYTES: títulos com caracteres multibyte (acentos, CJK, emoji)
+        # estouram antes do limite de caracteres, então cortamos também por
+        # bytes — com folga para os sufixos do yt-dlp (extensão, .part, .webp).
         artist = self._sanitize_filename(task.artist or "Unknown Artist", 60)
         title = self._sanitize_filename(task.title or "Unknown Title", 100)
         album = self._sanitize_filename(task.album or "Unknown Album", 60)
+        artist = _truncate_bytes(artist, 120) or "Unknown Artist"
+        album = _truncate_bytes(album, 120) or "Unknown Album"
+        stem = _truncate_bytes(f"{title} - {artist}", 240) or "Unknown Title"
 
         # Estrutura: Artist/Album/Track - Artist.ext
         if album and album != "Unknown Album":
-            return str(settings.download_dir / artist / album / f"{title} - {artist}.%(ext)s")
-        return str(settings.download_dir / artist / f"{title} - {artist}.%(ext)s")
+            return str(settings.download_dir / artist / album / f"{stem}.%(ext)s")
+        return str(settings.download_dir / artist / f"{stem}.%(ext)s")
 
     def _get_ydl_options(self, task: DownloadTask) -> dict[str, Any]:
         """Opções do yt-dlp para download."""
