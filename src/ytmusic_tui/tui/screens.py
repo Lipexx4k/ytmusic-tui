@@ -200,6 +200,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._set_album_tab_visible(False)
         self.refresh_library()
         self.update_downloads_table()
+        # Reconciliação de arquivos/temporários (§5.3/T03), fora do loop:
+        # avisa por toast só quando há o que reportar.
+        self.start_reconciliation()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Atualiza o conteúdo da aba ao ser ativada."""

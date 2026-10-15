@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from pathlib import Path
 
 import pytest
 from textual.widgets import Checkbox, Collapsible, Input, Label, Static, TabbedContent, Tabs
@@ -10,9 +11,24 @@ from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
+from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
+from ytmusic_tui.tui import library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
 from ytmusic_tui.tui.widgets import AlbumListView, SongListView, TrackListView
+
+
+@pytest.fixture(autouse=True)
+def _no_disk_reconciliation(monkeypatch):
+    """Neutraliza a reconciliação real em TODOS os testes da TUI.
+
+    Sem isto, cada ``on_mount`` varreria o ``download_dir`` real e poderia
+    importar/quarentenar/remover arquivos do usuário durante os testes; os
+    testes que precisam do comportamento injetam o próprio fake.
+    """
+    monkeypatch.setattr(
+        library_controller, "reconcile", lambda *args, **kwargs: ReconciliationReport()
+    )
 
 
 def _song(video_id: str, title: str, artist: str = "Artista") -> dict:
@@ -927,6 +943,73 @@ async def test_quit_with_in_flight_download_does_not_hang(monkeypatch):
         release.set()  # destrava o worker caso o cancelamento não o pegue
 
     assert app.return_code == 0
+
+
+@pytest.mark.asyncio
+async def test_on_mount_starts_reconciliation(monkeypatch):
+    """O ``on_mount`` da tela principal dispara a reconciliação (§5.3)."""
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        library_controller.LibraryController,
+        "start_reconciliation",
+        lambda self: calls.append(True),
+    )
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+    assert calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_findings_show_toast_and_refresh(monkeypatch):
+    """Achados da reconciliação viram toast e atualizam a biblioteca."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, MainScreen)
+
+        report = ReconciliationReport(
+            imported_files=[Path("/tmp/orfao.mp3")],
+            removed_temps=[Path("/tmp/velho.part")],
+        )
+        monkeypatch.setattr(library_controller, "reconcile", lambda *args, **kwargs: report)
+        toasts: list[str] = []
+        refreshed: list[bool] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        monkeypatch.setattr(screen, "refresh_library", lambda: refreshed.append(True))
+
+        await screen._run_reconciliation()
+
+        assert len(toasts) == 1
+        assert toasts[0].startswith("🧹 Reconciliação:")
+        assert "importado" in toasts[0] and "temporário" in toasts[0]
+        assert refreshed == [True]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_without_findings_is_quiet(monkeypatch):
+    """Sem achados não há toast nem refresh (inicialização silenciosa)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, MainScreen)
+
+        monkeypatch.setattr(
+            library_controller, "reconcile", lambda *args, **kwargs: ReconciliationReport()
+        )
+        toasts: list[str] = []
+        refreshed: list[bool] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        monkeypatch.setattr(screen, "refresh_library", lambda: refreshed.append(True))
+
+        await screen._run_reconciliation()
+
+        assert toasts == []
+        assert refreshed == []
 
 
 if __name__ == "__main__":

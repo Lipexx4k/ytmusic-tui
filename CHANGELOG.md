@@ -6,6 +6,21 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Adicionado
+
+- Publicação atômica de downloads (T03): o arquivo vai para um temporário em
+  `download_dir/.tmp/` (mesmo filesystem) e é publicado com `os.replace` +
+  `fsync`, com reserva exclusiva do nome final — nada é sobrescrito em
+  silêncio e duas tarefas não disputam o mesmo arquivo
+- Se o arquivo de destino já existir, o download não acontece: o existente é
+  validado, registrado na biblioteca (bitrate desconhecido) e a faixa é
+  concluída; se for inválido, a tarefa falha sem apagar nada
+- Reconciliação na inicialização (T03): arquivos válidos sem registro são
+  importados para a biblioteca, arquivos inválidos vão para
+  `download_dir/.quarantine/` (modo 0700), registros sem arquivo são
+  relatados no log e temporários/`.part` com mais de 24 h e prefixo do
+  próprio app são removidos — nunca arquivos finais
+
 ### Alterado
 
 - Downloads usam uma máquina de estados explícita (T02): novos estados

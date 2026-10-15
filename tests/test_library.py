@@ -223,5 +223,18 @@ def test_ensure_track_creates_artist_album_and_is_idempotent(library_service):
     assert stats["artists"] == 2
 
 
+def test_get_local_paths_returns_only_registered_files(library_service, tmp_path):
+    """get_local_paths lista os caminhos registrados (insumo da reconciliação)."""
+    assert library_service.get_local_paths() == set()
+
+    track_id = library_service.ensure_track(source_id="VIDY", title="Com Arquivo")
+    assert track_id is not None
+    media = tmp_path / "Com Arquivo.mp3"
+    media.write_bytes(b"audio")
+    library_service.update_track_file(track_id, media, 5, "mp3", 320)
+
+    assert library_service.get_local_paths() == {str(media)}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

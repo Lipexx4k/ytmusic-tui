@@ -1,5 +1,6 @@
 """Aba 📚 da biblioteca local (mixin de ``MainScreen``)."""
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -7,6 +8,7 @@ from rich.markup import escape
 from textual.widgets import Static
 
 from ytmusic_tui.library import library
+from ytmusic_tui.library.recovery import reconcile
 from ytmusic_tui.log import log_file_path
 from ytmusic_tui.player import player
 from ytmusic_tui.tui.widgets import TrackListView
@@ -28,6 +30,7 @@ class LibraryController:
     if TYPE_CHECKING:
 
         def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
+        def run_worker(self, *args: Any, **kwargs: Any) -> Any: ...
         def _toast(self, message: str) -> None: ...
 
     def refresh_library(self) -> None:
@@ -62,6 +65,29 @@ class LibraryController:
         view.display = bool(tracks)
         message.display = not tracks
         message.update(LIBRARY_EMPTY_TEXT)
+
+    # ===== Reconciliação de arquivos (§5.3/T03) =====
+
+    def start_reconciliation(self) -> None:
+        """Dispara a reconciliação de arquivos no início da sessão (§5.3).
+
+        Roda num worker porque a varredura de disco pode ser lenta (INV-12):
+        a UI não espera. Achados viram toast + atualização da biblioteca;
+        detalhes ficam no log.
+        """
+        self.run_worker(self._run_reconciliation(), group="reconcile")
+
+    async def _run_reconciliation(self) -> None:
+        """Executa a varredura fora do loop e resume o resultado na UI."""
+        try:
+            report = await asyncio.to_thread(reconcile)
+        except Exception:
+            # Falha na reconciliação não apaga nada; fica registrada no log.
+            logger.exception("Falha na reconciliação de arquivos")
+            return
+        if report.has_findings:
+            self._toast(f"🧹 Reconciliação: {report.summary()}")
+            self.refresh_library()
 
     def action_like(self) -> None:
         """Curte/descurte a faixa atual (apenas na biblioteca local, sem conta)."""

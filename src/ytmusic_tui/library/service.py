@@ -304,6 +304,16 @@ class LibraryService:
                 .all()
             )
 
+    def get_local_paths(self) -> set[str]:
+        """Todos os ``local_path`` registrados (insumo da reconciliação, §5.3)."""
+        with self.db.session() as session:
+            rows: list[str | None] = list(
+                session.execute(
+                    select(Track.local_path).where(Track.local_path.is_not(None))
+                ).scalars()
+            )
+        return {str(path) for path in rows if path}
+
     def get_recent_tracks(self, limit: int = 50) -> list[Track]:
         """Faixas adicionadas recentemente."""
         with self.db.session() as session:
