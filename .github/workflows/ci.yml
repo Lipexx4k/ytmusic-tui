@@ -33,6 +33,12 @@ jobs:
       - name: Lint (ruff)
         run: ruff check src/ tests/
 
+      - name: Formatação (ruff format)
+        run: ruff format --check src/ tests/
+
+      - name: Tipagem (mypy)
+        run: mypy src/
+
       - name: Testes (offline, com mocks)
         run: python -m pytest tests/ -q
 
@@ -53,3 +59,33 @@ jobs:
       # o alvo são as dependências (runtime e dev).
       - name: Vulnerabilidades conhecidas (pip-audit)
         run: pip-audit --skip-editable
+
+  # Verifica que o artefato publicável (sdist + wheel) instala e importa em
+  # um ambiente limpo — é o que o `pip install` do usuário final executa.
+  pacote:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Dependências de sistema (mpv + libmpv)
+        run: sudo apt-get update && sudo apt-get install -y mpv libmpv-dev
+
+      - name: Build (sdist + wheel)
+        run: |
+          pip install build
+          python -m build
+
+      - name: Instalar o wheel em ambiente limpo
+        run: |
+          python -m venv /tmp/venv-pacote
+          /tmp/venv-pacote/bin/pip install dist/*.whl
+
+      - name: Smoke test (import do app + console script)
+        run: |
+          /tmp/venv-pacote/bin/python -c "import ytmusic_tui, ytmusic_tui.main, ytmusic_tui.tui.app; print('import ok')"
+          test -x /tmp/venv-pacote/bin/ytmusic-tui
