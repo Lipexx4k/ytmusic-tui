@@ -4,16 +4,13 @@ import logging
 import pytest
 from textual.widgets import Checkbox, Collapsible, Input, Label, Static, TabbedContent, Tabs
 
-import ytmusic_tui.tui.app as app_module
-from ytmusic_tui.api import SearchResult
-from ytmusic_tui.player import PlayerEvent, TrackInfo
-from ytmusic_tui.tui.app import (
-    AlbumListView,
-    MainScreen,
-    SongListView,
-    TrackListView,
-    YTMusicTUI,
-)
+from ytmusic_tui.api import SearchResult, ytmusic
+from ytmusic_tui.config import settings
+from ytmusic_tui.download import download_manager
+from ytmusic_tui.library import library
+from ytmusic_tui.player import PlayerEvent, TrackInfo, player
+from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
+from ytmusic_tui.tui.widgets import AlbumListView, SongListView, TrackListView
 
 
 def _song(video_id: str, title: str, artist: str = "Artista") -> dict:
@@ -185,7 +182,7 @@ async def test_search_shows_albums_with_type_marker(monkeypatch):
         screen = app.screen
 
         monkeypatch.setattr(
-            app_module.ytmusic,
+            ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
                 tracks=[_song("v1", "Música")],
@@ -229,13 +226,13 @@ async def test_selecting_album_opens_tab_with_tracks(monkeypatch):
         tabs = screen.query_one("#main-tabs", TabbedContent)
 
         monkeypatch.setattr(
-            app_module.ytmusic,
+            ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
                 tracks=[], artists=[], albums=[_album_item()], playlists=[], videos=[]
             ),
         )
-        monkeypatch.setattr(app_module.ytmusic, "get_album", _album_details)
+        monkeypatch.setattr(ytmusic, "get_album", _album_details)
 
         await screen.perform_search("album teste")
         await pilot.pause()
@@ -279,7 +276,7 @@ async def test_focusing_list_highlights_first_item_for_enter(monkeypatch):
         await pilot.pause()
         screen = app.screen
         monkeypatch.setattr(
-            app_module.ytmusic,
+            ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
                 tracks=[_song("v1", "Música 1")],
@@ -289,7 +286,7 @@ async def test_focusing_list_highlights_first_item_for_enter(monkeypatch):
                 videos=[],
             ),
         )
-        monkeypatch.setattr(app_module.ytmusic, "get_album", _album_details)
+        monkeypatch.setattr(ytmusic, "get_album", _album_details)
         await screen.perform_search("álbum teste")
         await pilot.pause()
 
@@ -322,13 +319,13 @@ async def test_clicking_album_result_opens_album(monkeypatch):
         await pilot.pause()
         screen = app.screen
         monkeypatch.setattr(
-            app_module.ytmusic,
+            ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
                 tracks=[], artists=[], albums=[_album_item()], playlists=[], videos=[]
             ),
         )
-        monkeypatch.setattr(app_module.ytmusic, "get_album", _album_details)
+        monkeypatch.setattr(ytmusic, "get_album", _album_details)
         await screen.perform_search("álbum teste")
         await pilot.pause()
 
@@ -411,10 +408,10 @@ async def test_download_album_queues_tracks_and_skips_downloaded(monkeypatch):
         screen = app.screen
 
         queued: list[dict] = []
-        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
-        monkeypatch.setattr(app_module.library, "get_track_by_source_id", lambda video_id: None)
+        monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(library, "get_track_by_source_id", lambda video_id: None)
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "queue_download",
             lambda **kwargs: queued.append(kwargs) or object(),
         )
@@ -442,7 +439,7 @@ async def test_download_album_queues_tracks_and_skips_downloaded(monkeypatch):
             is_downloaded = True
 
         monkeypatch.setattr(
-            app_module.library,
+            library,
             "get_track_by_source_id",
             lambda video_id: _Downloaded() if video_id == "t1" else None,
         )
@@ -472,16 +469,16 @@ async def test_repeated_download_is_skipped_while_in_progress(monkeypatch):
         screen = app.screen
 
         queued: list[dict] = []
-        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "queue_download",
             lambda **kwargs: queued.append(kwargs) or object(),
         )
         # O vídeo passa a contar como "em andamento" após o primeiro Ctrl+D
         in_flight: set[str] = set()
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "is_active_or_pending",
             lambda video_id: video_id in in_flight,
         )
@@ -493,7 +490,7 @@ async def test_repeated_download_is_skipped_while_in_progress(monkeypatch):
         toasts: list[str] = []
         monkeypatch.setattr(screen, "_toast", toasts.append)
         monkeypatch.setattr(
-            app_module.player,
+            player,
             "_current_track",
             TrackInfo(video_id="abc123", title="Faixa", artist="Artista"),
         )
@@ -519,15 +516,15 @@ async def test_download_album_reports_tracks_in_progress(monkeypatch):
         screen = app.screen
 
         queued: list[dict] = []
-        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
-        monkeypatch.setattr(app_module.library, "get_track_by_source_id", lambda video_id: None)
+        monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(library, "get_track_by_source_id", lambda video_id: None)
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "queue_download",
             lambda **kwargs: queued.append(kwargs) or object(),
         )
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "is_active_or_pending",
             lambda video_id: True,
         )
@@ -554,11 +551,9 @@ async def test_library_refresh_twice_with_tracks(monkeypatch):
         local_path = None
         album = None
 
-    class _FakeLibrary:
-        def get_recent_tracks(self, limit=500):
-            return [_FakeTrack(), _FakeTrack()]
-
-    monkeypatch.setattr(app_module, "library", _FakeLibrary())
+    monkeypatch.setattr(
+        library, "get_recent_tracks", lambda limit=500: [_FakeTrack(), _FakeTrack()]
+    )
     app = YTMusicTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -584,11 +579,10 @@ async def test_library_load_error_is_shown_not_empty(monkeypatch, caplog):
     banco inacessível acharia que perdeu as faixas baixadas.
     """
 
-    class _BrokenLibrary:
-        def get_recent_tracks(self, limit=500):
-            raise RuntimeError("banco inacessível [Errno 5]")
+    def _broken(limit=500):
+        raise RuntimeError("banco inacessível [Errno 5]")
 
-    monkeypatch.setattr(app_module, "library", _BrokenLibrary())
+    monkeypatch.setattr(library, "get_recent_tracks", _broken)
     app = YTMusicTUI()
     with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
         async with app.run_test(size=(120, 40)) as pilot:
@@ -625,16 +619,14 @@ async def test_library_recovers_after_load_error(monkeypatch, caplog):
         local_path = None
         album = None
 
-    class _FlakyLibrary:
-        fail = True
+    flaky = {"fail": True}
 
-        def get_recent_tracks(self, limit=500):
-            if self.fail:
-                raise RuntimeError("boom")
-            return [_Track()]
+    def _flaky_tracks(limit=500):
+        if flaky["fail"]:
+            raise RuntimeError("boom")
+        return [_Track()]
 
-    flaky = _FlakyLibrary()
-    monkeypatch.setattr(app_module, "library", flaky)
+    monkeypatch.setattr(library, "get_recent_tracks", _flaky_tracks)
     app = YTMusicTUI()
     with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
         async with app.run_test(size=(120, 40)) as pilot:
@@ -643,7 +635,7 @@ async def test_library_recovers_after_load_error(monkeypatch, caplog):
             message = screen.query_one("#library-message", Static)
             assert "Não foi possível carregar" in str(message.render())
 
-            flaky.fail = False
+            flaky["fail"] = False
             screen.refresh_library()
             await pilot.pause()
 
@@ -675,7 +667,7 @@ async def test_queue_next_previous_and_auto_play(monkeypatch):
             played.append(info)
             return True
 
-        monkeypatch.setattr(app_module.player, "play", _fake_play)
+        monkeypatch.setattr(player, "play", _fake_play)
 
         screen._play_queue = [TrackInfo(video_id=str(i), title=f"F{i}") for i in range(3)]
         screen._play_index = 0
@@ -713,7 +705,7 @@ async def test_settings_inputs_apply(monkeypatch, tmp_path):
 
         saved: dict = {}
         monkeypatch.setattr(
-            type(app_module.settings),
+            type(settings),
             "update_and_save",
             lambda self, **kwargs: saved.update(kwargs),
         )
@@ -747,7 +739,7 @@ async def test_config_tab_widgets_apply_on_interaction(monkeypatch):
 
         saved: dict = {}
         monkeypatch.setattr(
-            type(app_module.settings),
+            type(settings),
             "update_and_save",
             lambda self, **kwargs: saved.update(kwargs),
         )
@@ -833,10 +825,10 @@ async def test_ctrl_d_downloads_even_with_search_input_focused(monkeypatch):
         screen = app.screen
 
         # Pipeline de download de verdade, mas sem rede/banco
-        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
         queued: list[dict] = []
         monkeypatch.setattr(
-            app_module.download_manager,
+            download_manager,
             "queue_download",
             lambda **kwargs: queued.append(kwargs) or object(),
         )
@@ -849,7 +841,7 @@ async def test_ctrl_d_downloads_even_with_search_input_focused(monkeypatch):
         monkeypatch.setattr(screen, "_toast", toasts.append)
 
         monkeypatch.setattr(
-            app_module.player,
+            player,
             "_current_track",
             TrackInfo(video_id="abc123", title="Faixa", artist="Artista"),
         )
@@ -868,7 +860,7 @@ async def test_ctrl_d_downloads_even_with_search_input_focused(monkeypatch):
         assert search.value == "abc"
 
         # Sem faixa em reprodução: avisa em vez de ignorar em silêncio
-        monkeypatch.setattr(app_module.player, "_current_track", None)
+        monkeypatch.setattr(player, "_current_track", None)
         await pilot.press("ctrl+d")
         await pilot.pause()
         assert len(queued) == 1
