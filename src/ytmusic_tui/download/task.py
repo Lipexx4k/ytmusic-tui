@@ -1,0 +1,156 @@
+"""Modelo da tarefa de download e sua máquina de estados (T02).
+
+Estados, transições permitidas e validação ficam centralizados aqui: o
+gerenciador e a TUI só observam o estado e pedem transições via
+``DownloadTask.transition_to`` — nenhum outro componente escreve ``status``
+(T02-R6). Transição fora da máquina levanta ``InvalidTransitionError``;
+quem tem corrida conhecida (ex.: ``shutdown()`` concorrente com o worker)
+consulta ``can_transition_to`` antes de transicionar.
+
+Transições permitidas (§4.2 do plano):
+
+    PENDING    → RUNNING, CANCELLED
+    RUNNING    → VALIDATING, FAILED, CANCELLED, INTERRUPTED
+    VALIDATING → COMPLETED, FAILED, INTERRUPTED
+    terminais  → (nenhuma; retomar = nova tarefa com ``retry_of``)
+
+``INTERRUPTED`` é terminal por decisão: encerrar o app no meio de um
+download fecha a tarefa, e a retomada é uma **nova** tarefa (T04-R2; ver
+Q7 registrada no plano de engenharia). O status usa ``StrEnum`` para
+serializar como string simples (persistência futura — T04).
+"""
+
+import asyncio
+import threading
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from uuid import uuid4
+
+__all__ = [
+    "ACTIVE_STATUSES",
+    "DownloadStatus",
+    "DownloadTask",
+    "InvalidTransitionError",
+    "TERMINAL_STATUSES",
+]
+
+
+class DownloadStatus(StrEnum):
+    """Estados possíveis de uma tarefa de download (§4.1 do plano)."""
+
+    PENDING = "pending"  # na fila, ainda não iniciada
+    RUNNING = "running"  # baixando (equivalente ao antigo DOWNLOADING)
+    VALIDATING = "validating"  # yt-dlp terminou; validando o arquivo final
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"  # encerramento do app no meio do trabalho
+
+
+#: Estados "em voo": a tarefa ainda pode evoluir (bloqueiam retentativa).
+ACTIVE_STATUSES = frozenset(
+    {DownloadStatus.PENDING, DownloadStatus.RUNNING, DownloadStatus.VALIDATING}
+)
+
+#: Estados finais: a tarefa não transiciona mais (nova tentativa = nova tarefa).
+TERMINAL_STATUSES = frozenset(
+    {
+        DownloadStatus.COMPLETED,
+        DownloadStatus.FAILED,
+        DownloadStatus.CANCELLED,
+        DownloadStatus.INTERRUPTED,
+    }
+)
+
+#: Tabela de transições permitidas — fonte de verdade da máquina (§4.2).
+_ALLOWED: dict[DownloadStatus, frozenset[DownloadStatus]] = {
+    DownloadStatus.PENDING: frozenset({DownloadStatus.RUNNING, DownloadStatus.CANCELLED}),
+    DownloadStatus.RUNNING: frozenset(
+        {
+            DownloadStatus.VALIDATING,
+            DownloadStatus.FAILED,
+            DownloadStatus.CANCELLED,
+            DownloadStatus.INTERRUPTED,
+        }
+    ),
+    DownloadStatus.VALIDATING: frozenset(
+        {
+            DownloadStatus.COMPLETED,
+            DownloadStatus.FAILED,
+            DownloadStatus.INTERRUPTED,
+        }
+    ),
+    DownloadStatus.COMPLETED: frozenset(),
+    DownloadStatus.FAILED: frozenset(),
+    DownloadStatus.CANCELLED: frozenset(),
+    DownloadStatus.INTERRUPTED: frozenset(),
+}
+
+
+class InvalidTransitionError(ValueError):
+    """Transição de estado fora da máquina (§4.2)."""
+
+    def __init__(self, current: DownloadStatus, target: DownloadStatus) -> None:
+        super().__init__(f"Transição inválida: {current.value} → {target.value}")
+        self.current = current
+        self.target = target
+
+
+@dataclass
+class DownloadTask:
+    """Uma tentativa de download (identificada por ``id``)."""
+
+    video_id: str
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    thumbnail_url: str = ""
+    track_id: int = 0  # ID na biblioteca local
+    # Identificador estável da tarefa (T02-R1): o log e a recuperação (T04)
+    # correlacionam eventos por ele; retentativa gera novo id.
+    id: str = field(default_factory=lambda: f"task-{uuid4().hex[:12]}")
+    # Se esta tarefa é uma retentativa, aponta para a tentativa anterior.
+    retry_of: str | None = None
+    status: DownloadStatus = DownloadStatus.PENDING
+    progress: float = 0.0
+    speed: str = ""
+    eta: str = ""
+    file_path: Path | None = None
+    error: str = ""
+    # Forward reference: ``DownloadTask`` ainda está sendo definido aqui.
+    _future: "asyncio.Future[DownloadTask] | None" = field(default=None, repr=False)
+    abort_event: threading.Event = field(default_factory=threading.Event, repr=False)
+
+    @property
+    def is_terminal(self) -> bool:
+        """True quando a tarefa não transiciona mais."""
+        return self.status in TERMINAL_STATUSES
+
+    def can_transition_to(self, target: DownloadStatus) -> bool:
+        """True se a transição é permitida a partir do estado atual."""
+        return target in _ALLOWED[self.status]
+
+    def transition_to(self, target: DownloadStatus) -> None:
+        """Muda de estado validando a máquina (§4.2).
+
+        Levanta ``InvalidTransitionError`` quando a transição não existe —
+        nunca "conserta" o estado em silêncio (INV-1). Em corridas esperadas
+        (worker × cancelamento/shutdown), consulte ``can_transition_to``
+        antes de chamar.
+        """
+        if not self.can_transition_to(target):
+            raise InvalidTransitionError(self.status, target)
+        self.status = target
+
+    def make_retry(self) -> "DownloadTask":
+        """Cria uma nova tentativa (novo ``id``) referenciando esta tarefa."""
+        return DownloadTask(
+            video_id=self.video_id,
+            title=self.title,
+            artist=self.artist,
+            album=self.album,
+            thumbnail_url=self.thumbnail_url,
+            track_id=self.track_id,
+            retry_of=self.id,
+        )
