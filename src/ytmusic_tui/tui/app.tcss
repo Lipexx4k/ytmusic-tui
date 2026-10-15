@@ -1,0 +1,303 @@
+/* CSS para YouTube Music TUI */
+
+Screen {
+    background: $background;
+    color: $text;
+}
+
+.section-title {
+    text-style: bold;
+    color: $primary;
+    margin: 1 0;
+    padding-left: 1;
+}
+
+#search-input {
+    margin: 1;
+    border: solid $primary;
+}
+
+#search-results {
+    margin: 1;
+    padding: 1;
+    background: $surface;
+    border: solid $secondary;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#search-message, #library-message, #album-message {
+    padding: 1 2;
+    color: $text-muted;
+}
+
+#search-songs, #library-list {
+    height: 1fr;
+}
+
+/* Títulos das seções dentro do painel de resultados */
+.list-title {
+    height: 1;
+    color: $text-muted;
+    text-style: bold;
+    padding-left: 1;
+}
+
+/* Músicas ficam com 3x o espaço dos álbuns; quando uma seção some
+   (display: none), a outra absorve o espaço automaticamente (fr). */
+#search-songs {
+    height: 3fr;
+}
+
+#search-albums {
+    height: 1fr;
+}
+
+#library-body {
+    height: 1fr;
+}
+
+/* Aba de álbum */
+#album-body {
+    height: 1fr;
+}
+
+#album-songs {
+    height: 1fr;
+    margin: 1;
+}
+
+#btn-download-album {
+    margin: 0 1;
+    width: auto;
+}
+
+#downloads-table {
+    height: 1fr;
+    margin: 1;
+}
+
+#downloads-table > .datatable--header {
+    background: $primary;
+    color: $text;
+}
+
+#downloads-table > .datatable--cursor {
+    background: $primary 30%;
+}
+
+#settings-content {
+    padding: 1;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#settings-content Collapsible {
+    margin: 1 0;
+    border: solid $secondary;
+}
+
+#settings-content Collapsible > .collapsible--title {
+    background: $surface;
+    padding: 0 1;
+    text-style: bold;
+}
+
+#settings-content Input {
+    margin: 0 1 1 1;
+    border: solid $secondary;
+}
+
+#settings-content Select {
+    margin: 0 1 1 1;
+    border: solid $secondary;
+}
+
+#settings-content Checkbox {
+    margin: 0 1 1 1;
+}
+
+/* Now Playing Bar */
+#np-container {
+    height: 100%;
+    align: center middle;
+}
+
+#np-info {
+    width: 40;
+    min-width: 30;
+    content-align: left middle;
+    padding-right: 2;
+}
+
+#np-controls {
+    width: auto;
+    min-width: 30;
+    content-align: center middle;
+    padding: 0 2;
+}
+
+#np-controls Button {
+    margin: 0 1;
+    min-width: 3;
+}
+
+#np-progress-container {
+    width: 1fr;
+    min-width: 40;
+    content-align: center middle;
+    padding: 0 2;
+}
+
+#np-progress {
+    width: 1fr;
+    min-width: 30;
+    margin: 0 2;
+}
+
+#np-time-current, #np-time-total {
+    width: auto;
+    min-width: 5;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+#np-volume {
+    width: auto;
+    min-width: 10;
+    content-align: right middle;
+    padding-right: 2;
+    color: $text-muted;
+}
+
+/* Scrollbars */
+ScrollableContainer > .scrollbar {
+    background: $surface;
+}
+
+ScrollableContainer > .scrollbar .slider {
+    background: $primary;
+}
+
+/* DataTable */
+DataTable {
+    background: $surface;
+}
+
+DataTable > .datatable--row:hover {
+    background: $primary 20%;
+}
+
+DataTable > .datatable--row:focus {
+    background: $primary 30%;
+}
+
+/* Tabs */
+Tabs {
+    background: $surface;
+}
+
+Tabs Tab {
+    padding: 0 2;
+    color: $text-muted;
+}
+
+Tabs Tab.-active {
+    color: $primary;
+    text-style: bold;
+}
+
+/* Sublinhado da aba ativa (widget interno do Textual).
+   Importante: NÃO aplicar border em `Tabs` — o Textual dimensiona as abas
+   como 2 linhas (rótulos + underline) e uma borda extra desloca o layout,
+   jogando o underline por cima do conteúdo e deixando as abas inalcançáveis
+   para o mouse (o clique passa a cair no TabPane). */
+Tabs Underline > .underline--bar {
+    color: $primary;
+    background: $surface;
+}
+
+/* ListView */
+ListView {
+    background: $surface;
+    border: solid $secondary;
+}
+
+ListView > ListItem {
+    padding: 0 1;
+}
+
+ListView > ListItem:hover {
+    background: $primary 20%;
+}
+
+ListView > ListItem.--highlight {
+    background: $primary 30%;
+}
+
+/* Button */
+Button {
+    border: solid $secondary;
+}
+
+Button.--primary {
+    background: $primary;
+    color: $text;
+}
+
+Button.--error {
+    background: $error;
+    color: $text;
+}
+
+/* Input */
+Input {
+    background: $surface;
+    border: solid $secondary;
+}
+
+Input:focus {
+    border: solid $primary;
+}
+
+/* Select */
+Select {
+    background: $surface;
+    border: solid $secondary;
+}
+
+Select:focus {
+    border: solid $primary;
+}
+
+/* Collapsible */
+Collapsible {
+    background: $surface;
+    border: solid $secondary;
+}
+
+Collapsible > .collapsible--title {
+    background: $background;
+    padding: 0 1;
+}
+
+/* Focus: sem regra catch-all `*:focus` com border — adicionar borda a um
+   widget focado muda a geometria dele (ex.: Tabs tem 2 linhas internas e a
+   borda estoura o layout, cobrindo o Underline pelo TabPane e matando o
+   clique nas abas). O Textual já estiliza foco nativamente. */
+
+/* Disabled */
+Button:disabled {
+    opacity: 0.5;
+}
+
+/* Custom colors for dark theme */
+$background: #0d1117;
+$surface: #161b22;
+$primary: #58a6ff;
+$secondary: #30363d;
+$text: #e6edf3;
+$text-muted: #8b949e;
+$error: #f85149;
+$success: #3fb950;
+$warning: #d29922;

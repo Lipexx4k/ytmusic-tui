@@ -1,0 +1,56 @@
+# Configuração do ytmusic-tui
+# Copie este arquivo para ~/.config/ytmusic-tui/config.toml e edite se necessário.
+#
+# O app funciona SEM conta do Google: busca, reprodução (mpv) e download
+# (yt-dlp) operam anonimamente, e a biblioteca é local (SQLite).
+# (A autenticação OAuth do ytmusicapi foi descontinuada pelo Google em 2025 —
+# ver sigma67/ytmusicapi#813.)
+
+# =============================================================================
+# PLAYER (mpv)
+# =============================================================================
+# Volume inicial (0-100)
+mpv_volume = 50
+
+# Qualidade de áudio: low, medium, high, best
+mpv_audio_quality = "high"
+
+# =============================================================================
+# DOWNLOADS
+# =============================================================================
+# Diretório para salvar downloads
+download_dir = "~/Music/YouTube Music"
+
+# Formato de áudio: mp3, opus, m4a, flac
+download_format = "mp3"
+
+# Qualidade em kbps (para mp3/opus) ou "best"
+download_quality = "320"
+
+# Quantos downloads simultâneos (1-10)
+download_concurrent = 3
+
+# Inserir metadados (tags ID3, capa do álbum) nos arquivos
+embed_metadata = true
+
+# =============================================================================
+# INTERFACE TUI
+# =============================================================================
+# Mostrar notificações toast
+show_notifications = true
+
+# Reproduzir próxima música automaticamente ao finalizar
+auto_play_next = true
+
+# Dica: as opções da aba "Config" do app são gravadas neste mesmo arquivo.
+
+# =============================================================================
+# AVANÇADO (geralmente não precisa alterar)
+# =============================================================================
+# Diretórios internos (gerenciados automaticamente)
+# config_dir = "~/.config/ytmusic-tui"
+# data_dir = "~/.local/share/ytmusic-tui"
+# cache_dir = "~/.cache/ytmusic-tui"
+
+# Nome do banco de dados da biblioteca
+library_db_name = "library.db"
