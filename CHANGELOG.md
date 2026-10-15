@@ -6,17 +6,35 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+## [0.1.2] - 2026-10-15
+
 ### Adicionado
 
 - Auditoria de vulnerabilidades conhecidas (`pip-audit`) nas dependências:
   no CI e nas ferramentas de desenvolvimento
 - Dependabot também para as GitHub Actions do CI (com `checkout` e
   `setup-python` atualizados para a v7, sem os avisos de depreciação do Node)
+- Gates de formatação (`ruff format --check`) e tipagem (`mypy`) no CI, além
+  de um job que constrói o pacote (sdist + wheel) e testa a instalação dele
+  em ambiente limpo (import do app + console script)
+- Teste que garante que `__version__` e o `version` do pyproject não divergem
+
+### Alterado
+
+- `ruff format` aplicado em todo o `src/` e `tests/` (sem mudança de
+  comportamento)
+- Tipagem: os 116 erros do `mypy` foram zerados — anotações completas nos
+  módulos, `Base` declarativa no estilo SQLAlchemy 2.0 e overrides
+  documentados para as bibliotecas sem stubs (`mpv`, `yt_dlp`) e para a
+  dívida conhecida de `Column[...]` em `library.service`
+- Metadados de licença no formato SPDX (`license = "MIT"` + `license-files`),
+  eliminando os avisos de depreciação do setuptools (prazo: fev/2027)
 
 ### Corrigido
 
-- Selo de testes no README: dizia 55, mas a suíte tem 61 testes passando
-  (valor conferido com `pytest` em ambiente limpo, como manda o manual)
+- Selo de testes no README (e as demais menções): dizia 55, mas a suíte tem
+  62 testes passando (valor conferido com `pytest` em ambiente limpo, como
+  manda o manual)
 - Nomes de arquivo com muitos caracteres multibyte (acentos, CJK, emoji)
   agora são cortados também por bytes (limite de 255 bytes por componente do
   filesystem), evitando falha do download por nome longo
