@@ -20,15 +20,29 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   `download_dir/.quarantine/` (modo 0700), registros sem arquivo são
   relatados no log e temporários/`.part` com mais de 24 h e prefixo do
   próprio app são removidos — nunca arquivos finais
+- Downloads que ficaram pela metade sobrevivem ao encerramento (T04): o
+  ciclo de vida das tarefas é persistido em tabela própria
+  (`download_tasks`) e, na execução seguinte, aparecem como interrompidos na
+  aba 📥, onde `r` retoma e `d` descarta
+- Retomar nunca reaproveita o `.part`: é uma nova tarefa (com `retry_of`) e
+  os temporários da tentativa antiga — inclusive o lock `.reserva` órfão de
+  um encerramento abrupto — são descartados antes de baixar de novo; o
+  arquivo final do usuário nunca é tocado
+- Temporários/`.part` de download aguardando decisão não são mais removidos
+  pela limpeza de 24 h: com dono, a decisão (retomar/descartar) é do
+  usuário; sem dono, a política de idade continua valendo
 
 ### Alterado
 
 - Downloads usam uma máquina de estados explícita (T02): novos estados
   "validando" e "interrompido"; cancelar não afeta as outras tarefas e nunca
   sobrescreve um resultado já finalizado; encerrar o app marca downloads em
-  voo como interrompidos (a retomada completa chega com T04)
+  voo como interrompidos (retomada e descarte na aba 📥)
 - Faixas diferentes que gerariam o mesmo arquivo final não são mais
   enfileiradas em paralelo (evita disputa pelo mesmo caminho de saída)
+- A tabela de downloads não duplica mais a linha da tarefa em execução
+  (fila + ativos eram somados) e a linha selecionada é a referência das
+  ações de retomar/descartar
 
 ## [0.1.2] - 2026-10-15
 

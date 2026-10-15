@@ -8,16 +8,20 @@ situações do §5.3:
 2. registro sem arquivo → apenas relata/loga: o ``Track`` não tem coluna de
    "ausente" e criar uma sem migração quebraria bancos antigos — a
    persistência fica para o T05 (nota registrada no plano);
-3. ``.part``/temporário antigo sem tarefa ativa → remove **somente** com
-   política explícita (idade > ``STALE_TEMP_AGE_HOURS`` E prefixo próprio);
+3. ``.part``/temporário antigo **sem dono** → remove somente com política
+   explícita (idade > ``STALE_TEMP_AGE_HOURS`` E prefixo próprio). Com o
+   espelho de tarefas (T04), temporário de tarefa aguardando decisão
+   (PENDING/RUNNING/VALIDATING/INTERRUPTED) fica **retido** mesmo acima da
+   idade: o usuário decide na TUI (r/d) e a limpeza explícita da tarefa
+   cuida dos arquivos — a idade volta a valer quando não há dono;
 4. arquivo final inválido → move para ``download_dir/.quarantine`` (modo
    0700), nunca apaga.
 
 Garantias: nunca apaga arquivos finais; a varredura de mídia é recursiva
 (Artista/Álbum/arquivo), exclui ``.tmp/`` e ``.quarantine/`` e considera só
 arquivos regulares com extensão suportada. A associação de um temporário a
-uma tarefa ``INTERRUPTED`` exige a persistência das tarefas (T04-R1): aqui
-fica só detecção, limpeza por política e log.
+uma tarefa usa o espelho persistido (T04-R1); falha ao lê-lo reduz a
+proteção à política de idade e fica no log.
 """
 
 import hashlib
@@ -36,6 +40,7 @@ from ytmusic_tui.download.pipeline import (
     MediaValidationError,
     validate_media_file,
 )
+from ytmusic_tui.download.store import DownloadTaskStore, PendingTaskFiles
 from ytmusic_tui.library.service import LibraryService, library
 
 logger = logging.getLogger(__name__)
@@ -58,6 +63,9 @@ class ReconciliationReport:
     quarantined_files: list[Path] = field(default_factory=list)
     missing_records: list[Path] = field(default_factory=list)
     removed_temps: list[Path] = field(default_factory=list)
+    #: Retidos por terem dono (tarefa aguardando decisão — r/d na TUI): não é
+    #: achado, é a política de 24 h refinada pelo T04 (fica só no log).
+    retained_temps: list[Path] = field(default_factory=list)
 
     @property
     def has_findings(self) -> bool:
@@ -88,18 +96,30 @@ def reconcile(
     service: LibraryService | None = None,
     *,
     now: datetime | None = None,
+    store: DownloadTaskStore | None = None,
 ) -> ReconciliationReport:
     """Executa a reconciliação completa (§5.3) e devolve o relatório.
 
     ``download_dir``/``service`` são injetáveis para testes; ``now`` fixa a
-    referência de idade da limpeza de temporários.
+    referência de idade da limpeza de temporários. ``store`` injeta o
+    espelho de tarefas (T04): temporários de tarefas aguardando decisão são
+    preservados mesmo acima da idade — a limpeza de idade só vale para
+    órfãos sem dono. O padrão usa o banco **do service** (mesmo arquivo),
+    nunca outro banco.
     """
     download_dir = download_dir if download_dir is not None else settings.download_dir
     service = service if service is not None else library
+    store = store if store is not None else DownloadTaskStore(db=service.db)
     reference = now if now is not None else datetime.now(UTC)
     report = ReconciliationReport()
     if not download_dir.is_dir():
         return report
+
+    # Donos (§5.3/T04): chaves/destinos de tarefas aguardando decisão — os
+    # seus temporários ficam retidos até o usuário retomar/descartar na TUI.
+    pending_files = _awaiting_decision_files(store)
+    referenced_keys = {item.key for item in pending_files}
+    referenced_finals = {item.final_path for item in pending_files}
 
     registered = service.get_local_paths()
 
@@ -128,12 +148,35 @@ def reconcile(
             report.missing_records.append(path)
             logger.warning("Registro sem arquivo no disco: %s", path)
 
-    # Situação 3: temporários/`.part` antigos (idade + prefixo próprio).
-    report.removed_temps.extend(_cleanup_stale_temps(download_dir, reference))
+    # Situação 3: temporários/`.part` antigos **sem dono** (idade + prefixo).
+    removed, retained = _cleanup_stale_temps(
+        download_dir,
+        reference,
+        referenced_keys=referenced_keys,
+        referenced_finals=referenced_finals,
+    )
+    report.removed_temps.extend(removed)
+    report.retained_temps.extend(retained)
 
     if report.has_findings:
         logger.info("Reconciliação concluída: %s", report.summary())
     return report
+
+
+def _awaiting_decision_files(store: DownloadTaskStore) -> list[PendingTaskFiles]:
+    """Temporários com dono (tarefa aguardando decisão); falha → lista vazia.
+
+    Falha de leitura do espelho reduz a proteção (a política de idade volta
+    a valer para todos), então fica no log — nunca em silêncio.
+    """
+    try:
+        return store.awaiting_decision_files()
+    except Exception:
+        logger.warning(
+            "Falha ao ler tarefas aguardando decisão: limpeza por idade vale para todos",
+            exc_info=True,
+        )
+        return []
 
 
 def scan_media_files(download_dir: Path) -> list[Path]:
@@ -223,22 +266,39 @@ def _quarantine(download_dir: Path, path: Path) -> Path:
     return target
 
 
-def _cleanup_stale_temps(download_dir: Path, now: datetime) -> list[Path]:
-    """Remove temporários antigos com prefixo próprio (política explícita).
+def _cleanup_stale_temps(
+    download_dir: Path,
+    now: datetime,
+    *,
+    referenced_keys: frozenset[str] | set[str] = frozenset(),
+    referenced_finals: frozenset[Path] | set[Path] = frozenset(),
+) -> tuple[list[Path], list[Path]]:
+    """Remove temporários antigos **sem dono** (política explícita do §5.3).
 
     Em ``.tmp/`` só remove arquivos com o nome próprio do pipeline
     (``chave.…``, incluindo ``.reserva``); no restante da árvore só sufixos
     de artefato do yt-dlp (``.part``/``.ytdl``). ``.quarantine/`` nunca é
-    varrida. Recentes são preservados: podem pertencer a um download em
-    andamento — a associação com a tarefa é T04.
+    varrida.
+
+    **Com dono fica retido** (T04): chave/destino de tarefa aguardando
+    decisão não é removido(a) nem acima da idade — a decisão é do usuário
+    (r/d na TUI), e é a limpeza explícita da tarefa que cuida dos arquivos.
+    Recentes também são preservados: podem pertencer a um download em
+    andamento. Devolve ``(removidos, retidos-por-dono)``.
     """
     removed: list[Path] = []
+    retained: list[Path] = []
     cutoff = now.timestamp() - STALE_TEMP_AGE_HOURS * 3600
 
     temp_dir = download_dir / TMP_DIR_NAME
     if temp_dir.is_dir():
         for path in sorted(temp_dir.iterdir()):
             if not path.is_file() or not _OWN_TEMP_NAME_RE.match(path.name):
+                continue
+            key = path.name.split(".", 1)[0]
+            if key in referenced_keys:
+                retained.append(path)
+                logger.info("Temporário preservado (tarefa aguardando decisão): %s", path)
                 continue
             if _is_stale(path, cutoff):
                 removed_path = _remove_stale_temp(path)
@@ -256,12 +316,16 @@ def _cleanup_stale_temps(download_dir: Path, now: datetime) -> list[Path]:
             continue
         if path.suffix.lower() not in _TEMP_SUFFIXES:
             continue
+        if path.with_suffix("") in referenced_finals:
+            retained.append(path)
+            logger.info("Temporário preservado (tarefa aguardando decisão): %s", path)
+            continue
         if _is_stale(path, cutoff):
             removed_path = _remove_stale_temp(path)
             if removed_path is not None:
                 removed.append(removed_path)
 
-    return removed
+    return removed, retained
 
 
 def _is_stale(path: Path, cutoff: float) -> bool:

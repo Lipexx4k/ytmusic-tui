@@ -13,6 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from ytmusic_tui.download.pipeline import reservation_key
+from ytmusic_tui.download.store import DownloadTaskStore
+from ytmusic_tui.download.task import DownloadStatus, DownloadTask
 from ytmusic_tui.library.database import DatabaseManager
 from ytmusic_tui.library.recovery import (
     STALE_TEMP_AGE_HOURS,
@@ -43,6 +46,12 @@ def service(temp_db) -> LibraryService:
     instance = LibraryService()
     instance.db = temp_db
     return instance
+
+
+@pytest.fixture
+def store(temp_db) -> DownloadTaskStore:
+    """Espelho de tarefas no MESMO banco do service (como em produção)."""
+    return DownloadTaskStore(db=temp_db)
 
 
 @pytest.fixture
@@ -165,6 +174,70 @@ def test_reconcile_removes_only_stale_own_temps(service, download_dir):
     assert recent_lock.exists() and foreign.exists() and recent_part.exists()
     # Arquivos de mídia nunca são tocados pela limpeza de temporários
     assert report.imported_files == []
+
+
+# ===== T04: temporários com dono (tarefa aguardando decisão) =====
+
+
+def test_reconcile_retains_owned_temps_and_removes_orphans(service, download_dir, store):
+    """T04/§5.3: temporário de tarefa INTERRUPTED fica retido mesmo velho.
+
+    O dono é a linha do espelho em estado aguardando decisão (aqui
+    INTERRUPTED — terminal para a máquina, decisão pendente para o usuário):
+    o refinamento da política de 24 h é que **com dono a idade não remove**;
+    sem dono, a limpeza antiga continua valendo. A decisão (r/d na TUI) é
+    que limpa os arquivos da tarefa.
+    """
+    final = download_dir / "A" / "B" / "T - A.mp3"
+    task = DownloadTask(video_id="abc", title="T", artist="A", album="B", id="task-dona")
+    task.transition_to(DownloadStatus.RUNNING)
+    task.transition_to(DownloadStatus.INTERRUPTED)
+    store.save(task, download_dir=download_dir, final_path=final)
+
+    tmp_dir = download_dir / ".tmp"
+    tmp_dir.mkdir()
+    key = reservation_key(final)
+    owned_part = tmp_dir / f"{key}.webm.part"
+    legacy_part = Path(f"{final}.part")
+    orphan_part = download_dir / "C" / "Outra - C.mp3.part"
+    orphan_tmp = tmp_dir / "aaaabbbbccccdddd.webm.part"
+    for path in (owned_part, legacy_part, orphan_part, orphan_tmp):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        _make_old(path)
+
+    report = reconcile(download_dir, service, store=store)
+
+    # Retidos: dono (chave e destino) — mesmo acima da idade
+    assert report.retained_temps == [owned_part, legacy_part]
+    assert owned_part.exists() and legacy_part.exists()
+    # Removidos: órfãos sem linha (política de idade continua para eles)
+    assert set(report.removed_temps) == {orphan_part, orphan_tmp}
+    assert not orphan_part.exists() and not orphan_tmp.exists()
+
+
+def test_reconcile_retains_temps_of_inflight_rows(service, download_dir, store):
+    """Linha em voo (PENDING/RUNNING/VALIDATING) também retém (§5.3/T04).
+
+    A reconciliação pode rodar antes da conversão da inicialização
+    (RUNNING→INTERRUPTED): a ordem não pode mudar a proteção.
+    """
+    final = download_dir / "A" / "B" / "P - A.mp3"
+    task = DownloadTask(video_id="xyz", title="P", artist="A", album="B", id="task-voo")
+    task.transition_to(DownloadStatus.RUNNING)
+    store.save(task, download_dir=download_dir, final_path=final)
+
+    tmp_dir = download_dir / ".tmp"
+    tmp_dir.mkdir()
+    owned = tmp_dir / f"{reservation_key(final)}.mp3"
+    owned.write_bytes(b"x")
+    _make_old(owned)
+
+    report = reconcile(download_dir, service, store=store)
+
+    assert report.retained_temps == [owned]
+    assert owned.exists()
+    assert report.removed_temps == []
 
 
 # ===== Situação 4: arquivo final inválido =====
