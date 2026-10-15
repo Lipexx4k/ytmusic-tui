@@ -35,3 +35,21 @@ jobs:
 
       - name: Testes (offline, com mocks)
         run: python -m pytest tests/ -q
+
+  seguranca:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar o app (com dependências de dev)
+        run: pip install -e ".[dev]"
+
+      # --skip-editable: o pacote local não está no PyPI e não é auditável;
+      # o alvo são as dependências (runtime e dev).
+      - name: Vulnerabilidades conhecidas (pip-audit)
+        run: pip-audit --skip-editable

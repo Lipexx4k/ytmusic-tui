@@ -340,7 +340,7 @@ YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
 
 Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
 
-O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push.
+O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, além de um job de `pip-audit` que falha se alguma dependência tiver vulnerabilidade conhecida.
 
 As dependências são atualizadas pelo **Dependabot** (PRs semanais): o CI roda em cada PR, então
 uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende

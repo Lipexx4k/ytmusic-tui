@@ -6,6 +6,11 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Adicionado
+
+- Auditoria de vulnerabilidades conhecidas (`pip-audit`) nas dependências:
+  no CI e nas ferramentas de desenvolvimento
+
 ### Corrigido
 
 - Nomes de arquivo com muitos caracteres multibyte (acentos, CJK, emoji)
