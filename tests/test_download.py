@@ -209,5 +209,24 @@ def test_shutdown_does_not_block(manager):
     assert task.abort_event.is_set()
 
 
+def test_is_active_or_pending_blocks_duplicates_but_allows_retry(manager):
+    """O mesmo vídeo não pode ser enfileirado duas vezes enquanto está ativo."""
+    assert manager.is_active_or_pending("x") is False
+
+    task = manager.queue_download(video_id="x", title="T")
+    assert manager.is_active_or_pending("x") is True  # pendente na fila
+    assert manager.is_active_or_pending("y") is False
+
+    # Finalizado/cancelado/falho libera tentar de novo (retry após erro)
+    for final in (DownloadStatus.COMPLETED, DownloadStatus.CANCELLED, DownloadStatus.FAILED):
+        task.status = final
+        assert manager.is_active_or_pending("x") is False
+
+    # Baixando agora (fora da fila visível) continua bloqueando
+    task.status = DownloadStatus.DOWNLOADING
+    manager._active_downloads["x"] = task
+    assert manager.is_active_or_pending("x") is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

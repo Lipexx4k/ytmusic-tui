@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # A libmpv é carregada no import de `mpv` (python-mpv); o ffmpeg não é
+      # usado pelos testes, mas garantimos o ambiente completo do app.
+      - name: Dependências de sistema (mpv + ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y mpv ffmpeg
+
+      - name: Instalar o app (com dependências de dev)
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Testes (offline, com mocks)
+        run: python -m pytest tests/ -q

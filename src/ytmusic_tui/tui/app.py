@@ -639,6 +639,7 @@ class MainScreen(Screen):
         album_title = album.get("title", "")
         queued = 0
         skipped = 0
+        in_progress = 0
         for track_data in tracks:
             info = self._track_info_from_song(track_data)
             if not info.video_id:
@@ -651,10 +652,14 @@ class MainScreen(Screen):
                 continue
             if self._enqueue_download(info, notify=False):
                 queued += 1
+            else:
+                in_progress += 1
 
         parts = []
         if queued:
             parts.append(f"{queued} faixa(s) enfileirada(s)")
+        if in_progress:
+            parts.append(f"{in_progress} já em andamento")
         if skipped:
             parts.append(f"{skipped} já baixada(s)")
         self._toast(f"💿 {album_title}: {', '.join(parts) if parts else 'nada novo para baixar'}")
@@ -666,6 +671,11 @@ class MainScreen(Screen):
         fique vinculado (aparece na aba Biblioteca).
         """
         if not track.video_id:
+            return False
+
+        if download_manager.is_active_or_pending(track.video_id):
+            if notify:
+                self._toast(f"⏳ Já na fila: {track.title}")
             return False
 
         track_id = library.ensure_track(

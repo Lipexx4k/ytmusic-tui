@@ -461,6 +461,85 @@ async def test_download_album_queues_tracks_and_skips_downloaded(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_repeated_download_is_skipped_while_in_progress(monkeypatch):
+    """Regressão: Ctrl+D duas vezes não pode enfileirar o mesmo vídeo de novo
+    (dois downloads disputariam o mesmo arquivo de saída e o mesmo .part)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        queued: list[dict] = []
+        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(
+            app_module.download_manager,
+            "queue_download",
+            lambda **kwargs: queued.append(kwargs) or object(),
+        )
+        # O vídeo passa a contar como "em andamento" após o primeiro Ctrl+D
+        in_flight: set[str] = set()
+        monkeypatch.setattr(
+            app_module.download_manager,
+            "is_active_or_pending",
+            lambda video_id: video_id in in_flight,
+        )
+
+        async def _noop(task):  # noqa: ANN001 - worker fake
+            return None
+
+        monkeypatch.setattr(screen, "_run_download", _noop)
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        monkeypatch.setattr(
+            app_module.player,
+            "_current_track",
+            TrackInfo(video_id="abc123", title="Faixa", artist="Artista"),
+        )
+
+        screen.query_one("#search-input", Input).focus()
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        assert len(queued) == 1
+
+        in_flight.add("abc123")
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        assert len(queued) == 1  # não duplicou
+        assert any("Já na fila" in t for t in toasts)
+
+
+@pytest.mark.asyncio
+async def test_download_album_reports_tracks_in_progress(monkeypatch):
+    """Faixas já em andamento não são reenfileiradas e entram no resumo."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        queued: list[dict] = []
+        monkeypatch.setattr(app_module.library, "ensure_track", lambda **kwargs: 1)
+        monkeypatch.setattr(app_module.library, "get_track_by_source_id", lambda video_id: None)
+        monkeypatch.setattr(
+            app_module.download_manager,
+            "queue_download",
+            lambda **kwargs: queued.append(kwargs) or object(),
+        )
+        monkeypatch.setattr(
+            app_module.download_manager,
+            "is_active_or_pending",
+            lambda video_id: True,
+        )
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.download_album(_album_details())
+        await pilot.pause()
+
+        assert queued == []
+        assert any("2 já em andamento" in t for t in toasts)
+
+
+@pytest.mark.asyncio
 async def test_library_refresh_twice_with_tracks(monkeypatch):
     """Regressão: atualizar a biblioteca duas vezes criava DuplicateIds."""
 

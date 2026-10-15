@@ -281,6 +281,20 @@ class DownloadManager:
         """Retorna downloads ativos."""
         return list(self._active_downloads.values())
 
+    def is_active_or_pending(self, video_id: str) -> bool:
+        """True se o vídeo já está baixando ou aguardando na fila.
+
+        Evita enfileirar o mesmo vídeo duas vezes: dois downloads simultâneos
+        disputariam o mesmo arquivo de saída (e o mesmo ``.part``).
+        """
+        if video_id in self._active_downloads:
+            return True
+        return any(
+            task.video_id == video_id
+            and task.status in (DownloadStatus.PENDING, DownloadStatus.DOWNLOADING)
+            for task in self._queue
+        )
+
     def clear_completed(self) -> None:
         """Remove downloads concluídos/cancelados da fila."""
         self._queue = [

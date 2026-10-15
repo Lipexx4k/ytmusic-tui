@@ -5,6 +5,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-52%20passando-brightgreen)
+![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
@@ -314,9 +315,19 @@ python3 -m venv .venv
 
 # Formatação
 .venv/bin/ruff format src/ tests/
+
+# Testes de integração (falam com o YouTube Music de verdade; desabilitados por padrão)
+YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
+
+# Auditoria de vulnerabilidades das dependências (opcional)
+.venv/bin/pip install pip-audit && .venv/bin/pip-audit
 ```
 
-Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste toca a rede ou o player de verdade**.
+Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
+
+O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push.
+
+**Ambiente de desenvolvimento/teste do autor** (LMDE 7): Python 3.13.5 · mpv 0.40.0 (libmpv) · ffmpeg 7.1.5 · textual 8.2.8 · ytmusicapi 1.12.3 · yt-dlp 2026.8.19 · SQLAlchemy 2.1.4.
 
 ## 🗺️ Roadmap
 
