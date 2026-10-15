@@ -41,6 +41,7 @@ __all__ = [
     "AWAITING_DECISION_STATUSES",
     "DownloadTaskStore",
     "PendingTaskFiles",
+    "hydrate_interrupted",
 ]
 
 #: Estados "aguardando decisão" (ordem fixa para serialização previsível).
@@ -75,6 +76,29 @@ class PendingTaskFiles:
     def legacy_parts(self) -> tuple[Path, Path]:
         """``.part``/``.ytdl`` ao lado do destino final (artefatos do yt-dlp)."""
         return Path(f"{self.final_path}.part"), Path(f"{self.final_path}.ytdl")
+
+
+def hydrate_interrupted(row: DownloadTaskRecord) -> DownloadTask:
+    """Reconstrói a tarefa a partir da linha, já em ``INTERRUPTED`` (T04-R2).
+
+    **Hidratação, não transição**: a máquina da T02 governa transições *em
+    voo*; a linha persistida é o passado da tarefa. Reconstruí-la direto no
+    estado ``INTERRUPTED`` evita inventar uma transição que não existe na
+    §4.2 (PENDING→INTERRUPTED, por exemplo) — nada avançou desde o
+    encerramento, então não há transição a fazer.
+    """
+    return DownloadTask(
+        video_id=row.video_id,
+        title=row.title,
+        artist=row.artist,
+        album=row.album,
+        thumbnail_url=row.thumbnail_url,
+        track_id=row.track_id,
+        id=row.task_id,
+        retry_of=row.retry_of or None,
+        status=DownloadStatus.INTERRUPTED,
+        error="Interrompido no encerramento anterior",
+    )
 
 
 class DownloadTaskStore:

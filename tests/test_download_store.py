@@ -14,7 +14,11 @@ from pathlib import Path
 import pytest
 
 from ytmusic_tui.download.pipeline import TMP_DIR_NAME, reservation_key
-from ytmusic_tui.download.store import AWAITING_DECISION_STATUSES, DownloadTaskStore
+from ytmusic_tui.download.store import (
+    AWAITING_DECISION_STATUSES,
+    DownloadTaskStore,
+    hydrate_interrupted,
+)
 from ytmusic_tui.download.task import DownloadStatus, DownloadTask
 from ytmusic_tui.library.database import DatabaseManager
 from ytmusic_tui.library.models import DownloadTaskRecord
@@ -238,6 +242,32 @@ def test_awaiting_decision_files_excludes_terminals(store, tmp_path):
     store.save(failed, download_dir=tmp_path, final_path=_final(tmp_path, "x.mp3"))
 
     assert store.awaiting_decision_files() == []
+
+
+def test_hydrate_interrupted_rebuilds_task_without_transition(store, tmp_path):
+    """Hidratação: linha vira tarefa já em INTERRUPTED (construtor, não máquina).
+
+    PENDING→INTERRUPTED não existe na §4.2; reconstruir o passado não é uma
+    transição — todos os campos voltam, com erro explicativo e ``retry_of``.
+    """
+    task = _task(retry_of="task-original")
+    store.save(task, download_dir=tmp_path, final_path=_final(tmp_path))
+    store.mark_active_as_interrupted()
+    row = store.find(task.id)
+    assert row is not None
+
+    hydrated = hydrate_interrupted(row)
+
+    assert hydrated.status is DownloadStatus.INTERRUPTED
+    assert hydrated.id == "task-aaa111"
+    assert hydrated.video_id == "vid1"
+    assert hydrated.title == "Faixa"
+    assert hydrated.artist == "Artista"
+    assert hydrated.album == "Álbum"
+    assert hydrated.thumbnail_url == "http://example.com/x.jpg"
+    assert hydrated.track_id == 42
+    assert hydrated.retry_of == "task-original"
+    assert "Interrompido" in hydrated.error
 
 
 def test_awaiting_decision_files_skips_rows_without_paths(store, tmp_path):

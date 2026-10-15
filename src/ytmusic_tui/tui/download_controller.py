@@ -35,6 +35,23 @@ class DownloadController:
 
     # ===== Tabela de downloads =====
 
+    def _download_rows(self) -> list[DownloadTask]:
+        """Linhas da tabela: fila + ativas, sem duplicatas (T04-R2).
+
+        A fila em memória ainda contém a tarefa RUNNING (ela só sai em
+        cancel/clear): sem o dedup por ``id``, cada download ativo apareceria
+        duas vezes — e o mapeamento linha ↔ tarefa de retomar/descartar
+        ficaria ambíguo.
+        """
+        rows: list[DownloadTask] = []
+        seen: set[str] = set()
+        for task in download_manager.get_queue() + download_manager.get_active_downloads():
+            if task.id in seen:
+                continue
+            seen.add(task.id)
+            rows.append(task)
+        return rows
+
     def update_downloads_table(self) -> None:
         """Atualiza tabela de downloads."""
         try:
@@ -45,8 +62,7 @@ class DownloadController:
         table.clear(columns=True)
         table.add_columns("Status", "Título", "Artista", "Progresso", "Velocidade", "ETA")
 
-        all_tasks = download_manager.get_queue() + download_manager.get_active_downloads()
-        for task in all_tasks:
+        for task in self._download_rows():
             status_icon = {
                 DownloadStatus.PENDING: "⏳",
                 DownloadStatus.RUNNING: "⬇️",
@@ -65,6 +81,18 @@ class DownloadController:
                 task.eta,
             )
 
+    def _selected_download_task(self) -> DownloadTask | None:
+        """Tarefa da linha selecionada na tabela de downloads (ou ``None``)."""
+        try:
+            table = self.query_one("#downloads-table", DataTable)
+        except Exception:
+            return None
+        rows = self._download_rows()
+        index: int = table.cursor_row
+        if 0 <= index < len(rows):
+            return rows[index]
+        return None
+
     # ===== Ações =====
 
     def action_download(self) -> None:
@@ -80,6 +108,58 @@ class DownloadController:
             self._toast("Nenhum álbum aberto — selecione um álbum na busca")
             return
         self.download_album(self._current_album)
+
+    def action_retry_download(self) -> None:
+        """Retoma a tarefa INTERRUPTED selecionada (tecla "r", T04-R2/R3).
+
+        Retomar é uma **nova** tarefa (novo id + ``retry_of``): o ``.part``
+        antigo é descartado com log (consistência não é verificável de forma
+        barata) e o fluxo completo roda de novo.
+        """
+        task = self._selected_download_task()
+        if task is None or task.status is not DownloadStatus.INTERRUPTED:
+            self._toast("Selecione um download interrompido (⏸️) na aba downloads para retomar")
+            return
+        new_task = download_manager.retry_interrupted(task.id)
+        if new_task is None:
+            self._toast("Não foi possível retomar o download")
+            return
+        self.update_downloads_table()
+        self.run_worker(self._run_download(new_task), group="download")
+        self._toast(f"🔁 Retomando: {task.title}")
+
+    def action_discard_download(self) -> None:
+        """Descarta a tarefa INTERRUPTED selecionada (tecla "d", T04-R2).
+
+        Descarte explícito: limpa os temporários **da própria tarefa**
+        (logados) e a linha persistida. O arquivo final nunca é tocado.
+        """
+        task = self._selected_download_task()
+        if task is None or task.status is not DownloadStatus.INTERRUPTED:
+            self._toast("Selecione um download interrompido (⏸️) na aba downloads para descartar")
+            return
+        discarded = download_manager.discard_interrupted(task.id)
+        if discarded is None:
+            self._toast("Não foi possível descartar o download")
+            return
+        self.update_downloads_table()
+        detail = f" — {len(discarded)} temporário(s) removido(s)" if discarded else ""
+        self._toast(f"🗑️ Download descartado: {task.title}{detail}")
+
+    def announce_interrupted(self) -> None:
+        """Avisa sobre downloads interrompidos recuperados (T04-R2).
+
+        Roda após a recuperação da inicialização: o toast só ensina as
+        teclas — r/d exigem selecionar a linha na aba 📥 Downloads.
+        """
+        interrupted = sum(
+            1 for task in download_manager.get_queue() if task.status is DownloadStatus.INTERRUPTED
+        )
+        if interrupted:
+            self._toast(
+                f"⏸️ {interrupted} download(s) interrompido(s) — aba 📥: "
+                "selecione e use r (retomar) ou d (descartar)"
+            )
 
     def download_current_track(self) -> None:
         """Baixa a faixa em reprodução."""

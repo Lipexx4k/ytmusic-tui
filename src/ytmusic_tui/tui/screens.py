@@ -70,6 +70,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         Binding("ctrl+d", "download", "Baixar", priority=True),
         Binding("l", "like", "Curtir"),
         Binding("a", "download_album", "Baixar álbum"),
+        Binding("r", "retry_download", "Retomar download"),
+        Binding("d", "discard_download", "Descartar download"),
         Binding("escape", "back_to_search", "Voltar", show=False),
         Binding("ctrl+l", "library", "Biblioteca"),
         Binding("f1", "help", "Ajuda"),
@@ -200,6 +202,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._set_album_tab_visible(False)
         self.refresh_library()
         self.update_downloads_table()
+        # Tarefas interrompidas recuperadas na inicialização (T04-R2): avisa
+        # uma vez que há decisão pendente (r retoma, d descarta).
+        self.announce_interrupted()
         # Reconciliação de arquivos/temporários (§5.3/T03), fora do loop:
         # avisa por toast só quando há o que reportar.
         self.start_reconciliation()

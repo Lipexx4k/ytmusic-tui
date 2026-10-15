@@ -54,6 +54,11 @@ class YTMusicTUI(App):
         # Inicializar banco de dados
         db_manager.create_all()
 
+        # T04-R2: tarefas deixadas por uma execução anterior viram INTERRUPTED
+        # e entram na fila, para a UI oferecer retomar (r) / descartar (d).
+        # Depois do create_all: a tabela do espelho precisa existir.
+        download_manager.recover_interrupted()
+
         # Inicializar API (cliente anônimo; nenhum login necessário)
         ytmusic.initialize()
 

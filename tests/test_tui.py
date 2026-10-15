@@ -5,7 +5,16 @@ import logging
 from pathlib import Path
 
 import pytest
-from textual.widgets import Checkbox, Collapsible, Input, Label, Static, TabbedContent, Tabs
+from textual.widgets import (
+    Checkbox,
+    Collapsible,
+    DataTable,
+    Input,
+    Label,
+    Static,
+    TabbedContent,
+    Tabs,
+)
 
 from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
@@ -13,14 +22,39 @@ from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
-from ytmusic_tui.tui import library_controller
+from ytmusic_tui.tui import download_controller, library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
 from ytmusic_tui.tui.widgets import AlbumListView, SongListView, TrackListView
 
 
+class _NoopStore:
+    """Espelho de tarefas sem disco, para os testes da TUI (T04).
+
+    Nenhum teste da TUI pode tocar o banco real do usuário: a recuperação
+    da inicialização (``recover_interrupted``) e as ações r/d leriam/escreveriam
+    ``download_tasks`` de verdade. Aqui tudo é vazio e nada persiste — os
+    testes específicos injetam fakes próprios.
+    """
+
+    def save(self, *args, **kwargs) -> None: ...
+    def update_status(self, *args, **kwargs) -> None: ...
+    def delete(self, *args, **kwargs) -> None: ...
+    def find(self, *args, **kwargs):
+        return None
+
+    def mark_active_as_interrupted(self) -> int:
+        return 0
+
+    def load_interrupted(self) -> list:
+        return []
+
+    def awaiting_decision_files(self) -> list:
+        return []
+
+
 @pytest.fixture(autouse=True)
 def _no_disk_reconciliation(monkeypatch):
-    """Neutraliza a reconciliação real em TODOS os testes da TUI.
+    """Neutraliza disco real (reconciliação e espelho de tarefas) em TODOS os testes.
 
     Sem isto, cada ``on_mount`` varreria o ``download_dir`` real e poderia
     importar/quarentenar/remover arquivos do usuário durante os testes; os
@@ -29,6 +63,7 @@ def _no_disk_reconciliation(monkeypatch):
     monkeypatch.setattr(
         library_controller, "reconcile", lambda *args, **kwargs: ReconciliationReport()
     )
+    monkeypatch.setattr(download_manager, "_store", _NoopStore())
 
 
 def _song(video_id: str, title: str, artist: str = "Artista") -> dict:
@@ -476,6 +511,186 @@ async def test_download_album_queues_tracks_and_skips_downloaded(monkeypatch):
         await pilot.pause()
         assert queued == []
         assert any("Nenhum álbum aberto" in t for t in toasts)
+
+
+# ===== T04: recuperação de downloads interrompidos na TUI (r/d) =====
+
+
+@pytest.mark.asyncio
+async def test_app_mount_recovers_interrupted_downloads(monkeypatch):
+    """O on_mount do App chama a recuperação (T04-R2) depois do create_all."""
+    calls: list[int] = []
+    monkeypatch.setattr(download_manager, "recover_interrupted", lambda: calls.append(1) or 0)
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_main_screen_announces_interrupted_on_mount(monkeypatch):
+    """A tela principal avisa, na montagem, que há decisão pendente (r/d)."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        download_controller.DownloadController,
+        "announce_interrupted",
+        lambda self: calls.append(1),
+    )
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_announce_interrupted_toast_teaches_keys(monkeypatch):
+    """Com interrompidas, o toast ensina r/d; sem elas, nada de toast."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        interrupted = DownloadTask(video_id="abc", title="Faixa", status=DownloadStatus.INTERRUPTED)
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [interrupted])
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.announce_interrupted()
+
+        assert len(toasts) == 1
+        assert "1 download(s) interrompido(s)" in toasts[0]
+        assert "r" in toasts[0] and "d" in toasts[0]
+
+        toasts.clear()
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [])
+        screen.announce_interrupted()
+        assert toasts == []
+
+
+@pytest.mark.asyncio
+async def test_downloads_table_deduplicates_running_task(monkeypatch):
+    """Regressão T04: fila + ativos repetiam a linha da tarefa RUNNING.
+
+    ``get_queue()`` devolve a fila em memória, que ainda contém a tarefa em
+    execução (ela só sai em cancel/clear): sem o dedup por ``id``, a tabela
+    mostrava duas linhas — e o mapeamento linha ↔ tarefa de r/d ficava
+    ambíguo.
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        task = DownloadTask(video_id="abc", title="Faixa")
+        task.transition_to(DownloadStatus.RUNNING)
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [task])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [task])
+
+        screen.update_downloads_table()
+
+        table = screen.query_one("#downloads-table", DataTable)
+        assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_action_retry_download_retries_selected_interrupted(monkeypatch):
+    """Tecla "r" na linha selecionada: retoma como nova tarefa e roda o worker."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        old = DownloadTask(
+            video_id="abc", title="Faixa", id="task-antiga", status=DownloadStatus.INTERRUPTED
+        )
+        new = DownloadTask(video_id="abc", title="Faixa", id="task-nova", retry_of="task-antiga")
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [old])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        retried: list[str] = []
+        monkeypatch.setattr(
+            download_manager, "retry_interrupted", lambda task_id: retried.append(task_id) or new
+        )
+        started: list[DownloadTask] = []
+
+        async def _run(task):  # noqa: ANN001 - worker fake
+            started.append(task)
+
+        monkeypatch.setattr(screen, "_run_download", _run)
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.update_downloads_table()  # linha selecionável para o mapeamento
+        screen.action_retry_download()
+        await pilot.pause()
+
+        assert retried == ["task-antiga"]
+        assert started == [new]  # o fluxo completo roda como a tarefa nova
+        assert any("Retomando" in t for t in toasts)
+
+
+@pytest.mark.asyncio
+async def test_action_discard_download_discards_selected_interrupted(monkeypatch):
+    """Tecla "d" na linha selecionada: descarta e resume os temporários removidos."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        old = DownloadTask(
+            video_id="abc", title="Faixa", id="task-antiga", status=DownloadStatus.INTERRUPTED
+        )
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [old])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        discarded: list[str] = []
+        monkeypatch.setattr(
+            download_manager,
+            "discard_interrupted",
+            lambda task_id: discarded.append(task_id) or [Path("/tmp/x.mp3.part")],
+        )
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.update_downloads_table()
+        screen.action_discard_download()
+
+        assert discarded == ["task-antiga"]
+        assert any("descartado" in t for t in toasts)
+        assert "1 temporário(s) removido(s)" in toasts[-1]
+
+
+@pytest.mark.asyncio
+async def test_retry_and_discard_require_interrupted_selection(monkeypatch):
+    """r/d sem INTERRUPTED selecionada só orientam — não chamam o manager."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        running = DownloadTask(video_id="abc", title="Faixa")
+        running.transition_to(DownloadStatus.RUNNING)
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [running])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        calls: list[str] = []
+        monkeypatch.setattr(
+            download_manager, "retry_interrupted", lambda task_id: calls.append(task_id)
+        )
+        monkeypatch.setattr(
+            download_manager, "discard_interrupted", lambda task_id: calls.append(task_id)
+        )
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.update_downloads_table()
+        screen.action_retry_download()
+        screen.action_discard_download()
+
+        assert calls == []
+        assert len(toasts) == 2
+        assert all("Selecione um download interrompido" in t for t in toasts)
 
 
 @pytest.mark.asyncio

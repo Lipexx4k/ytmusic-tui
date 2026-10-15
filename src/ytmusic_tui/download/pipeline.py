@@ -39,6 +39,7 @@ __all__ = [
     "OverwriteRefusedError",
     "PipelineError",
     "Reservation",
+    "discard_task_files",
     "publish_file",
     "release",
     "reserve",
@@ -162,6 +163,36 @@ def release(reservation: Reservation) -> None:
             pass
         except OSError:
             logger.warning("Não foi possível remover temporário %s", leftover, exc_info=True)
+
+
+def discard_task_files(*, temp_dir: Path, final_path: Path) -> list[Path]:
+    """Remove temporários/locks DESTA tarefa (retomar/descartar — T04-R3).
+
+    Política própria e mais estreita que a limpeza por idade (§5.3): apenas
+    ``<chave>.*`` dentro do ``.tmp`` da tarefa e os sufixos legados
+    ``<final>.part``/``<final>.ytdl`` ao lado do destino. O arquivo final
+    **nunca** é tocado, e a limpeza só acontece em decisão explícita do
+    usuário (retomar/descartar) — a automática continua sendo só por idade
+    com dono desconhecido. Cada remoção e cada falha é logada (nunca em
+    silêncio); devolve os caminhos efetivamente removidos.
+    """
+    removed: list[Path] = []
+    key = reservation_key(final_path)
+    candidates = sorted(temp_dir.glob(f"{key}.*"))
+    candidates += [Path(f"{final_path}.part"), Path(f"{final_path}.ytdl")]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            logger.warning("Falha ao descartar temporário %s", path, exc_info=True)
+            continue
+        removed.append(path)
+        logger.info("Temporário de tarefa descartado: %s", path)
+    return removed
 
 
 def validate_media_file(path: Path | None, expected_format: str) -> Path:

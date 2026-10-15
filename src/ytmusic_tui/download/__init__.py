@@ -12,10 +12,12 @@ from ytmusic_tui.config import settings
 
 # Pipeline de disco (§5.1/T03): validação, reserva, publicação e fsync.
 from ytmusic_tui.download.pipeline import (
+    TMP_DIR_NAME,
     DestinationBusy,
     InvalidInputError,
     MediaValidationError,
     PipelineError,
+    discard_task_files,
     publish_file,
     release,
     reserve,
@@ -25,7 +27,7 @@ from ytmusic_tui.download.pipeline import (
 
 # Espelho persistido das tarefas (T04-R1): pista de recuperação para a
 # próxima execução. Falha de escrita nunca quebra o download (ver `_persist`).
-from ytmusic_tui.download.store import DownloadTaskStore
+from ytmusic_tui.download.store import DownloadTaskStore, hydrate_interrupted
 
 # Estados e máquina de transições vivem em `task.py` (T02) e são
 # re-exportados aqui para os imports existentes (TUI, testes).
@@ -574,6 +576,143 @@ class DownloadManager:
         este método só encolhe a fila em memória.
         """
         self._queue = [t for t in self._queue if not t.is_terminal]
+
+    # ===== Recuperação de tarefas interrompidas (T04-R2/R3) =====
+
+    def recover_interrupted(self) -> int:
+        """Recupera tarefas deixadas por uma execução anterior (T04-R2).
+
+        Chamado na inicialização, depois de ``create_all``: converte as
+        linhas em voo em ``INTERRUPTED`` (a partir daí a decisão é do
+        usuário) e **hidrata** cada linha de volta em um ``DownloadTask`` na
+        fila, para a UI listar e oferecer retomar (r) / descartar (d).
+
+        Hidratação, não transição: a máquina da T02 governa transições *em
+        voo*; a linha persistida é o passado da tarefa — reconstruí-la já no
+        estado ``INTERRUPTED`` (construtor) é a forma de não inventar uma
+        transição que não existe (PENDING→INTERRUPTED, por exemplo, não está
+        na §4.2 e não precisa estar: nada avançou desde o encerramento).
+        Devolve quantas tarefas foram recuperadas; falha de leitura fica no
+        log e não impede o app de abrir.
+        """
+        try:
+            self._store.mark_active_as_interrupted()
+            rows = self._store.load_interrupted()
+        except Exception:
+            logger.warning(
+                "Falha ao recuperar tarefas interrompidas (downloads novos seguem)",
+                exc_info=True,
+            )
+            return 0
+
+        known = {task.id for task in self._queue}
+        recovered: list[DownloadTask] = []
+        for row in rows:
+            if row.task_id in known:
+                continue
+            recovered.append(hydrate_interrupted(row))
+        self._queue.extend(recovered)
+        if recovered:
+            logger.info(
+                "Recuperação: %d download(s) interrompido(s) aguardando decisão (r/d)",
+                len(recovered),
+            )
+        return len(recovered)
+
+    def _interrupted_in_queue(self, task_id: str) -> DownloadTask | None:
+        """Tarefa ``INTERRUPTED`` na fila em memória — única fonte de r/d.
+
+        Se a linha existe no banco mas a tarefa não está na fila, algo saiu
+        do previsto: r/d não inventam estado; a inicialização seguinte
+        reoferece a decisão.
+        """
+        for task in self._queue:
+            if task.id == task_id and task.status is DownloadStatus.INTERRUPTED:
+                return task
+        return None
+
+    def _task_files(self, task: DownloadTask) -> tuple[Path, Path]:
+        """``(temp_dir, final_path)`` da tarefa, preferindo o persistido.
+
+        O pai do final **não** é o ``download_dir`` (template gera
+        ``download_dir/Artista[/Álbum]/…``): por isso a linha guarda os dois
+        caminhos. Sem a linha (falha de escrita do espelho), cai para o
+        template atual — que é determinístico em (título, artista, álbum,
+        formato).
+        """
+        try:
+            row = self._store.find(task.id)
+        except Exception:
+            logger.warning("Falha ao ler a linha persistida de %s", task.id, exc_info=True)
+            row = None
+        if row is not None and row.final_path and row.download_dir:
+            return Path(row.download_dir) / TMP_DIR_NAME, Path(row.final_path)
+        return settings.download_dir / TMP_DIR_NAME, self._final_path_for(task)
+
+    def retry_interrupted(self, task_id: str) -> DownloadTask | None:
+        """Cria a nova tentativa de uma tarefa INTERRUPTED (T04-R2/R3).
+
+        Retomar **nunca** reaproveita o ``.part``: a consistência de um
+        parcial do yt-dlp/ffmpeg não é verificável de forma barata, então a
+        retomada é uma **nova tarefa** (``retry_of``) e os temporários da
+        tentativa antiga são descartados com log — inclusive o lock
+        ``<chave>.reserva``, que órfão bloquearia a nova reserva. O arquivo
+        final nunca é tocado. Devolve a nova tarefa, ou ``None`` quando o id
+        não corresponde a uma INTERRUPTED na fila.
+        """
+        task = self._interrupted_in_queue(task_id)
+        if task is None:
+            return None
+
+        temp_dir, final_path = self._task_files(task)
+        discarded = discard_task_files(temp_dir=temp_dir, final_path=final_path)
+
+        new_task = task.make_retry()
+        # A entrada antiga sai da fila em memória: sem isso a INTERRUPTED
+        # ficaria listada junto com a nova PENDING do mesmo vídeo (T04-R2).
+        self._queue.remove(task)
+        self._queue.append(new_task)
+        # Persistir a nova ANTES de remover a antiga: um crash no meio deixa
+        # as duas linhas (recuperável) em vez de nenhuma (trabalho perdido).
+        self._persist(
+            f"nova tentativa de {task.id}",
+            lambda: self._store.save(
+                new_task,
+                download_dir=settings.download_dir,
+                final_path=self._final_path_for(new_task),
+            ),
+        )
+        self._persist(f"remoção da linha antiga de {task.id}", lambda: self._store.delete(task.id))
+        logger.info(
+            "Retomando download %s como %s (%d temporário(s) antigo(s) descartado(s))",
+            task.id,
+            new_task.id,
+            len(discarded),
+        )
+        return new_task
+
+    def discard_interrupted(self, task_id: str) -> list[Path] | None:
+        """Descarta uma tarefa INTERRUPTED: limpa os temporários próprios e a linha.
+
+        Devolve os caminhos removidos do disco (a UI mostra a contagem) ou
+        ``None`` quando o id não corresponde a uma INTERRUPTED na fila. O
+        arquivo final, se existir, **nunca** é removido (§5.3) — só
+        temporários e locks da própria tarefa, com log.
+        """
+        task = self._interrupted_in_queue(task_id)
+        if task is None:
+            return None
+
+        temp_dir, final_path = self._task_files(task)
+        discarded = discard_task_files(temp_dir=temp_dir, final_path=final_path)
+        self._queue.remove(task)
+        self._persist(f"descarte de {task.id}", lambda: self._store.delete(task.id))
+        logger.info(
+            "Tarefa interrompida descartada: %s (%d temporário(s) removido(s))",
+            task.id,
+            len(discarded),
+        )
+        return discarded
 
     def shutdown(self) -> None:
         """Encerra o gerenciador sem bloquear a saída do app (T02-R4).
