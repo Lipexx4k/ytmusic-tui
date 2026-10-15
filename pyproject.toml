@@ -4,14 +4,14 @@ version = "0.1.1"
 description = "Cliente TUI minimalista e rápido para YouTube Music"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Eeyore"}]
 keywords = ["youtube-music", "tui", "music-player", "terminal"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: Portuguese (Brazilian)",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
@@ -37,6 +37,8 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "build>=1.0.0",
     "pip-audit>=2.7.0",
 ]
 
@@ -73,6 +75,22 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+
+# Bibliotecas de terceiros sem stubs/py.typed: o mypy não consegue analisar
+# `mpv` (python-mpv) nem `yt_dlp`; o uso de ambas é encapsulado em
+# `player/` e `download/`.
+[[tool.mypy.overrides]]
+module = ["mpv", "yt_dlp"]
+ignore_missing_imports = true
+
+# Dívida conhecida (planejada em T05 do plano de engenharia): os modelos usam
+# `Column[...]` clássico e o mypy — sem o plugin do SQLAlchemy, removido no
+# 2.1 — enxerga atributos de instância como `Column[...]` em vez do valor
+# real. Os códigos abaixo são suprimidos só no serviço da biblioteca, que
+# manipula instâncias ORM; o restante do código segue checado de verdade.
+[[tool.mypy.overrides]]
+module = ["ytmusic_tui.library.service"]
+disable_error_code = ["assignment", "return-value", "arg-type"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
