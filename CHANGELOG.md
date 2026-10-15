@@ -19,7 +19,7 @@ Primeira versão publicada. 🎉
 - Biblioteca local em SQLite (faixas baixadas e curtidas locais)
 - Configuração por TOML e variáveis de ambiente (`YTMUSIC_*`), editável na aba
   ⚙️ Config do app
-- 52 testes automatizados (offline, com mocks) + testes de integração opcionais
+- 55 testes automatizados (offline, com mocks) + testes de integração opcionais
   (`YTMUSIC_INTEGRATION=1`)
 - CI no GitHub Actions (ruff + testes em Python 3.11 e 3.13)
 

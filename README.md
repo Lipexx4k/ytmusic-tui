@@ -4,13 +4,13 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-52%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-55%20passando-brightgreen)
 ![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **52 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **55 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -112,7 +112,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 ## 📋 Requisitos
 
 - **Python 3.11+**
-- **mpv** (com libmpv) — é o player. No Linux, o pacote `mpv` já inclui a libmpv
+- **mpv** (com libmpv) — é o player. Na maioria das distros o pacote `mpv` já inclui a libmpv (se o app não abrir, veja *Problemas comuns na instalação*)
 - **ffmpeg** — conversão e marcação dos downloads
 - Dependências Python (ytmusicapi, textual, yt-dlp, sqlalchemy…) são instaladas via pip/pipx junto com o app
 - Terminal com cores (256/true color) e Unicode — **mínimo 80×24**, recomendado 100×30+
@@ -283,7 +283,7 @@ YTMUSIC_DOWNLOAD_DIR=/tmp/teste YTMUSIC_DATA_DIR=/tmp/teste ytmusic-tui
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 52 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 55 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -301,7 +301,7 @@ ytmusic-tui/
 │   ├── download/              # Fila de downloads yt-dlp (progresso, concorrência)
 │   ├── library/               # Biblioteca SQLite (SQLAlchemy)
 │   └── tui/                   # Interface Textual (app.py + app.tcss)
-└── tests/                     # 52 testes (pytest, sem rede)
+└── tests/                     # 55 testes offline (pytest) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento
