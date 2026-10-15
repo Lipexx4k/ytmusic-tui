@@ -39,7 +39,7 @@ class YTMusicTUI(App):
         Binding("f1", "help", "Ajuda", show=True),
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._ui_timer: Timer | None = None
 
@@ -140,7 +140,7 @@ class YTMusicTUI(App):
         db_manager.close()
 
 
-def main():
+def main() -> None:
     """Ponto de entrada principal."""
     try:
         setup_logging()

@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from platformdirs import user_cache_dir, user_config_dir, user_data_dir
 from pydantic import Field, field_validator
@@ -19,7 +20,7 @@ from pydantic_settings import (
 DEFAULT_CONFIG_FILE = Path(user_config_dir("ytmusic-tui")) / "config.toml"
 
 
-def _toml_literal(value) -> str:
+def _toml_literal(value: object) -> str:
     """Serializa um valor simples para TOML (str, bool, int, float)."""
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
         mode="before",
     )
     @classmethod
-    def _expand_user_path(cls, value):
+    def _expand_user_path(cls, value: object) -> object:
         """Expande '~' em caminhos vindos do arquivo de configuração."""
         if isinstance(value, (str, os.PathLike)):
             return Path(os.path.expanduser(str(value)))
@@ -137,7 +138,7 @@ class Settings(BaseSettings):
         description="Reproduzir próxima música automaticamente",
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # Garantir que diretórios existam
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +151,7 @@ class Settings(BaseSettings):
         """Caminho completo do banco de dados da biblioteca."""
         return self.data_dir / self.library_db_name
 
-    def update_and_save(self, **updates) -> None:
+    def update_and_save(self, **updates: Any) -> None:
         """Atualiza valores em memória e persiste no arquivo TOML.
 
         Preserva chaves já existentes no arquivo (inclusive desconhecidas).
@@ -161,12 +162,15 @@ class Settings(BaseSettings):
             setattr(self, key, value)
         self._save_toml(updates)
 
-    def _save_toml(self, updates: dict) -> None:
+    def _save_toml(self, updates: dict[str, Any]) -> None:
         """Reescreve o TOML aplicando as atualizações."""
         import tomllib
 
-        path = Path(self.model_config.get("toml_file") or DEFAULT_CONFIG_FILE)
-        data: dict = {}
+        # ``model_config`` é um TypedDict: o valor de ``toml_file`` pode ser
+        # Path ou str, então normalizamos antes de usar.
+        configured = self.model_config.get("toml_file")
+        path = Path(str(configured)) if configured else DEFAULT_CONFIG_FILE
+        data: dict[str, Any] = {}
         if path.exists():
             try:
                 data = tomllib.loads(path.read_text(encoding="utf-8"))

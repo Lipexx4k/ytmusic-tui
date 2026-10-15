@@ -1,6 +1,7 @@
 """Fila de reprodução e ações do player (mixin de ``MainScreen``)."""
 
 import time
+from typing import TYPE_CHECKING, Any
 
 from ytmusic_tui.config import settings
 from ytmusic_tui.library.models import Track
@@ -16,10 +17,15 @@ class PlaybackController:
     ``#search-songs``/``#album-songs``/``#library-list`` vêm do layout.
     """
 
-    # Estado (inicializado pela tela host).
+    # Estado e membros fornecidos pela tela host (o mypy analisa cada mixin
+    # isoladamente; as declarações abaixo existem só na checagem de tipos).
     _play_queue: list[TrackInfo]
     _play_index: int
     _last_auto_next: float
+    if TYPE_CHECKING:
+
+        def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
+        def _toast(self, message: str) -> None: ...
 
     # ===== Ações do player (atalhos e botões) =====
 
@@ -69,10 +75,10 @@ class PlaybackController:
         else:
             source_url = f"https://music.youtube.com/watch?v={track.source_id}"
         return TrackInfo(
-            video_id=track.source_id,
-            title=track.title,
+            video_id=str(track.source_id),
+            title=str(track.title),
             artist=", ".join(track.artist_names),
-            album=track.album.title if track.album else "",
+            album=str(track.album.title) if track.album else "",
             source_url=source_url,
         )
 

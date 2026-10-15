@@ -9,9 +9,23 @@ authentication``. A biblioteca do app é local (SQLite).
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from ytmusicapi import YTMusic
+
+# Filtros aceitos pelo ``YTMusic.search`` (o parâmetro é um Literal lá).
+SearchFilter = Literal[
+    "songs",
+    "videos",
+    "albums",
+    "artists",
+    "playlists",
+    "community_playlists",
+    "featured_playlists",
+    "profiles",
+    "podcasts",
+    "episodes",
+]
 
 
 @dataclass
@@ -28,7 +42,7 @@ class SearchResult:
 class YTMusicAPI:
     """Cliente para API do YouTube Music."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._client: YTMusic | None = None
         self._initialized = False
         self.last_error: str = ""
@@ -74,7 +88,7 @@ class YTMusicAPI:
     def search(
         self,
         query: str,
-        filter: str = "songs",
+        filter: SearchFilter = "songs",
         limit: int = 20,
         ignore_spelling: bool = False,
     ) -> list[dict[str, Any]]:
@@ -125,20 +139,26 @@ class YTMusicAPI:
         """Obtém detalhes de uma playlist."""
         return self.client.get_playlist(playlist_id, limit=limit)
 
-    def get_watch_playlist(self, video_id: str, limit: int = 25) -> list[dict[str, Any]]:
-        """Obtém playlist de reprodução (radio/watch) para uma música."""
+    def get_watch_playlist(
+        self, video_id: str, limit: int = 25
+    ) -> dict[str, list[dict[str, Any]] | str | None]:
+        """Obtém playlist de reprodução (radio/watch) para uma música.
+
+        O ytmusicapi devolve um dict (chaves ``tracks``, ``lyrics`` etc.),
+        não uma lista de faixas.
+        """
         return self.client.get_watch_playlist(video_id, limit=limit)
 
     def get_home(self) -> list[dict[str, Any]]:
         """Obtém página inicial (recomendações)."""
         return self.client.get_home()
 
-    def get_mood_categories(self) -> list[dict[str, Any]]:
-        """Obtém categorias de humor/gênero."""
+    def get_mood_categories(self) -> dict[str, list[dict[str, Any]]]:
+        """Obtém categorias de humor/gênero (formato do ytmusicapi)."""
         return self.client.get_mood_categories()
 
     def get_mood_playlists(self, params: str) -> list[dict[str, Any]]:
-        """Obtém playlists de um humor/categoria."""
+        """Obtém playlists de um humor/categoria (formato do ytmusicapi)."""
         return self.client.get_mood_playlists(params)
 
     def get_stream_url(self, video_id: str) -> str:

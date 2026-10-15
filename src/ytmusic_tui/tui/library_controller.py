@@ -1,6 +1,7 @@
 """Aba 📚 da biblioteca local (mixin de ``MainScreen``)."""
 
 import logging
+from typing import TYPE_CHECKING, Any, cast
 
 from rich.markup import escape
 from textual.widgets import Static
@@ -21,6 +22,13 @@ LIBRARY_EMPTY_TEXT = (
 
 class LibraryController:
     """Mixin com a listagem da biblioteca local e as curtidas."""
+
+    # Membros fornecidos pela tela host (o mypy analisa cada mixin
+    # isoladamente; as declarações abaixo existem só na checagem de tipos).
+    if TYPE_CHECKING:
+
+        def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
+        def _toast(self, message: str) -> None: ...
 
     def refresh_library(self) -> None:
         """Atualiza a lista de faixas da biblioteca local (in-place).
@@ -66,5 +74,5 @@ class LibraryController:
         if not lib_track:
             self._toast("Baixe a faixa primeiro (Ctrl+D) para curtí-la na biblioteca local")
             return
-        liked = library.toggle_like(lib_track.id)
+        liked = library.toggle_like(cast(int, lib_track.id))
         self._toast("❤️ Curtida (local)" if liked else "Removida das curtidas (local)")

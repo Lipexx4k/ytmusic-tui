@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import Enum as PyEnum
+from typing import cast
 
 from sqlalchemy import (
     Boolean,
@@ -17,9 +18,11 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SQLEnum,
 )
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """Base declarativa dos modelos (estilo SQLAlchemy 2.0)."""
 
 
 def utcnow() -> datetime:
@@ -44,7 +47,9 @@ class Artist(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_id = Column(String(100), nullable=False, index=True)  # ID do YouTube Music
     name = Column(String(255), nullable=False, index=True)
-    source = Column(SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False)
+    source: Column[TrackSource] = Column(
+        SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False
+    )
     thumbnail_url = Column(String(500))
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
@@ -58,7 +63,7 @@ class Artist(Base):
         Index("ix_artist_name_source", "name", "source"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Artist(id={self.id}, name='{self.name}', source_id='{self.source_id}')>"
 
 
@@ -68,7 +73,9 @@ class Album(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_id = Column(String(100), nullable=False, index=True)
     title = Column(String(255), nullable=False, index=True)
-    source = Column(SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False)
+    source: Column[TrackSource] = Column(
+        SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False
+    )
     release_year = Column(Integer)
     release_date = Column(String(20))  # YYYY-MM-DD
     thumbnail_url = Column(String(500))
@@ -88,7 +95,7 @@ class Album(Base):
         Index("ix_album_title_source", "title", "source"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Album(id={self.id}, title='{self.title}', source_id='{self.source_id}')>"
 
 
@@ -109,7 +116,9 @@ class Track(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_id = Column(String(100), nullable=False, index=True)  # Video ID do YouTube
     title = Column(String(255), nullable=False, index=True)
-    source = Column(SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False)
+    source: Column[TrackSource] = Column(
+        SQLEnum(TrackSource), default=TrackSource.YOUTUBE_MUSIC, nullable=False
+    )
 
     # Metadados
     duration_seconds = Column(Integer, default=0)
@@ -153,21 +162,25 @@ class Track(Base):
         Index("ix_track_liked_added", "is_liked", "added_at"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Track(id={self.id}, title='{self.title}', source_id='{self.source_id}')>"
 
     @property
-    def primary_artist(self):
-        """Retorna o artista principal (primeiro da lista)."""
+    def primary_artist(self) -> Artist | None:
+        """Retorna o artista principal (primeiro da lista).
+
+        ``cast``: sem o plugin do mypy do SQLAlchemy (removido no 2.1) os
+        relacionamentos sem anotação ``Mapped[...]`` são vistos como ``Any``.
+        """
         for ta in self.artists:
             if ta.is_primary:
-                return ta.artist
-        return self.artists[0].artist if self.artists else None
+                return cast("Artist", ta.artist)
+        return cast("Artist", self.artists[0].artist) if self.artists else None
 
     @property
     def artist_names(self) -> list[str]:
         """Lista de nomes dos artistas."""
-        return [ta.artist.name for ta in self.artists]
+        return [str(ta.artist.name) for ta in self.artists]
 
 
 class TrackArtist(Base):
@@ -189,7 +202,9 @@ class Playlist(Base):
     source_id = Column(String(100), nullable=True, index=True)  # ID do YT Music se sincronizada
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
-    source = Column(SQLEnum(TrackSource), default=TrackSource.LOCAL_FILE, nullable=False)
+    source: Column[TrackSource] = Column(
+        SQLEnum(TrackSource), default=TrackSource.LOCAL_FILE, nullable=False
+    )
     thumbnail_url = Column(String(500))
     is_system = Column(Boolean, default=False)  # Playlists do sistema (liked, history, etc)
     track_count = Column(Integer, default=0)
@@ -202,7 +217,7 @@ class Playlist(Base):
 
     __table_args__ = (UniqueConstraint("source_id", "source", name="uq_playlist_source"),)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Playlist(id={self.id}, name='{self.name}', source='{self.source.value}')>"
 
 
@@ -243,5 +258,5 @@ class UserSettings(Base):
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<UserSetting(key='{self.key}', value='{self.value[:50]}')>"

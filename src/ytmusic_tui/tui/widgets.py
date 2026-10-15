@@ -1,5 +1,7 @@
 """Widgets personalizados usados pelas telas da TUI."""
 
+from typing import Any
+
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -24,7 +26,7 @@ class AutoHighlightListView(ListView):
 class TrackListView(AutoHighlightListView):
     """Lista de faixas da biblioteca local."""
 
-    def __init__(self, tracks: list[Track] | None = None, **kwargs):
+    def __init__(self, tracks: list[Track] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.tracks: list[Track] = []
         self.set_tracks(tracks or [])
@@ -51,14 +53,14 @@ class TrackListView(AutoHighlightListView):
 class SearchInput(Input):
     """Input de busca com placeholder."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(placeholder="🔍 Buscar músicas, artistas, álbuns...", **kwargs)
 
 
 class SongListView(AutoHighlightListView):
     """Lista de resultados de busca (dicionários crus da API)."""
 
-    def __init__(self, songs: list[dict] | None = None, **kwargs):
+    def __init__(self, songs: list[dict] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.songs: list[dict] = []
         self.set_songs(songs or [])
@@ -88,7 +90,7 @@ class SongListView(AutoHighlightListView):
 class AlbumListView(AutoHighlightListView):
     """Lista de álbuns (dicionários crus da API de busca)."""
 
-    def __init__(self, albums: list[dict] | None = None, **kwargs):
+    def __init__(self, albums: list[dict] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.albums: list[dict] = []
         self.set_albums(albums or [])
@@ -133,7 +135,7 @@ class NowPlayingBar(Static):
     }
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.current_track: TrackInfo | None = None
 

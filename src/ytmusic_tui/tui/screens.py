@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 from pathlib import Path
+from typing import Any, cast
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -19,11 +20,12 @@ from textual.widgets import (
     ListView,
     Select,
     Static,
+    Tab,
     TabbedContent,
     TabPane,
 )
 
-from ytmusic_tui.api import ytmusic
+from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.player import TrackInfo, player
@@ -73,7 +75,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         Binding("f1", "help", "Ajuda"),
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._play_queue: list[TrackInfo] = []
         self._play_index: int = -1
@@ -209,10 +211,11 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
 
     # ===== Álbuns =====
 
-    def _album_tab(self):
+    def _album_tab(self) -> Tab | None:
         """Retorna o ``Tab`` da aba de álbum (None se ainda não montada)."""
         with contextlib.suppress(Exception):
-            return self.query_one("#main-tabs", TabbedContent).get_tab("tab-album")
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            return cast(Tab | None, tabs.get_tab("tab-album"))
         return None
 
     def _set_album_tab_visible(self, visible: bool, title: str | None = None) -> None:
@@ -368,6 +371,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             # perform_search é assíncrono: precisa ser agendado como worker
             self.run_worker(self.perform_search(event.value), exclusive=True, group="search")
             return
+        if event.input.id is None:
+            return
         self._apply_text_setting(event.input.id, event.value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -418,19 +423,15 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Reproduz o item selecionado (ou abre o álbum) em uma lista."""
         view = event.list_view
-        if view.id == "search-songs":
+        if isinstance(view, SongListView):
             song = view.get_selected_song()
-            if song:
-                self.play_song(song)
-        elif view.id == "search-albums":
+            if song and view.id:
+                self.play_song(song, view_id=view.id)
+        elif isinstance(view, AlbumListView):
             album = view.get_selected_album()
             if album:
                 self.open_album(album.get("browseId", ""), album)
-        elif view.id == "album-songs":
-            song = view.get_selected_song()
-            if song:
-                self.play_song(song, view_id="album-songs")
-        elif view.id == "library-list":
+        elif isinstance(view, TrackListView):
             track = view.get_selected_track()
             if track:
                 self.play_library_track(track)
@@ -475,7 +476,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         message.display = True
         message.update(text)
 
-    def display_search_results(self, results) -> None:
+    def display_search_results(self, results: SearchResult | list[dict[str, Any]]) -> None:
         """Exibe resultados da busca: músicas e álbuns (in-place).
 
         Aceita uma lista de músicas (compatibilidade) ou um ``SearchResult``.

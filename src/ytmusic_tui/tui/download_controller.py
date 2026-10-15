@@ -1,10 +1,15 @@
 """Ações de download na TUI (mixin de ``MainScreen``)."""
 
+from typing import TYPE_CHECKING, Any
+
 from textual.widgets import DataTable
 
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.player import TrackInfo, player
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class DownloadController:
@@ -16,8 +21,17 @@ class DownloadController:
     vêm dos mixins do mesmo host.
     """
 
-    # Estado (inicializado pela tela host).
+    # Estado e membros fornecidos pela tela host (o mypy analisa cada mixin
+    # isoladamente; as declarações abaixo existem só na checagem de tipos).
     _current_album: dict | None
+    if TYPE_CHECKING:
+
+        def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
+        def run_worker(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _toast(self, message: str) -> None: ...
+        def refresh_library(self) -> None: ...
+
+        _track_info_from_song: Callable[..., Any]
 
     # ===== Tabela de downloads =====
 

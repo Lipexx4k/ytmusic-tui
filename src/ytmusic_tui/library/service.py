@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from ytmusic_tui.library.database import db_manager
@@ -25,7 +25,7 @@ from ytmusic_tui.library.models import (
 class LibraryService:
     """Serviço para gerenciar biblioteca local de músicas."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.db = db_manager
 
     # ===== Artistas =====
@@ -90,7 +90,7 @@ class LibraryService:
         source_id: str,
         title: str,
         source: TrackSource = TrackSource.YOUTUBE_MUSIC,
-        **kwargs,
+        **kwargs: Any,
     ) -> Album:
         """Busca ou cria álbum."""
         album = session.execute(
@@ -158,7 +158,7 @@ class LibraryService:
         source_id: str,
         title: str,
         source: TrackSource = TrackSource.YOUTUBE_MUSIC,
-        **kwargs,
+        **kwargs: Any,
     ) -> Track:
         """Busca ou cria faixa."""
         track = session.execute(
@@ -469,7 +469,7 @@ class LibraryService:
             else:
                 # Deslocar faixas existentes
                 session.execute(
-                    PlaylistTrack.__table__.update()
+                    update(PlaylistTrack)
                     .where(
                         PlaylistTrack.playlist_id == playlist_id,
                         PlaylistTrack.position >= position,
@@ -505,7 +505,7 @@ class LibraryService:
         with self.db.session() as session:
             for pos, track_id in enumerate(track_ids, 1):
                 session.execute(
-                    PlaylistTrack.__table__.update()
+                    update(PlaylistTrack)
                     .where(
                         PlaylistTrack.playlist_id == playlist_id,
                         PlaylistTrack.track_id == track_id,

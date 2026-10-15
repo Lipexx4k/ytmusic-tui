@@ -57,7 +57,7 @@ class MPVPlayer:
         "best": "bestaudio/best",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._mpv: mpv.MPV | None = None
         self._state = PlayerState.STOPPED
         self._current_track: TrackInfo | None = None
@@ -139,7 +139,7 @@ class MPVPlayer:
             return
 
         @self._mpv.property_observer("time-pos")
-        def _on_time_pos(_name, value):
+        def _on_time_pos(_name: str, value: Any) -> None:
             if value is not None and self._current_track:
                 self._current_track.position = value
                 # O mpv dispara time-pos a cada tick; limitar a ~4 eventos/s
@@ -153,13 +153,13 @@ class MPVPlayer:
                     )
 
         @self._mpv.property_observer("duration")
-        def _on_duration(_name, value):
+        def _on_duration(_name: str, value: Any) -> None:
             if value is not None and self._current_track:
                 self._current_track.duration = value
                 self._emit("duration", {"duration": value})
 
         @self._mpv.property_observer("pause")
-        def _on_pause(_name, value):
+        def _on_pause(_name: str, value: Any) -> None:
             if value is not None:
                 if value:
                     self._state = PlayerState.PAUSED
@@ -169,14 +169,14 @@ class MPVPlayer:
                     self._emit("resume", {})
 
         @self._mpv.property_observer("idle-active")
-        def _on_idle(_name, value):
+        def _on_idle(_name: str, value: Any) -> None:
             if value and self._state != PlayerState.STOPPED:
                 self._state = PlayerState.STOPPED
                 self._current_track = None
                 self._emit("ended", {})
 
         @self._mpv.event_callback("end-file")
-        def _on_end_file(event):
+        def _on_end_file(event: Any) -> None:
             # python-mpv entrega um MpvEvent (não um dict). Usamos as_dict()
             # para acessar os campos de forma segura.
             try:
@@ -190,7 +190,7 @@ class MPVPlayer:
                 self._state = PlayerState.ERROR
                 self._emit("error", {"message": data.get("error", "Erro desconhecido")})
 
-    def _emit(self, event: str, data: dict[str, Any] = None) -> None:
+    def _emit(self, event: str, data: dict[str, Any] | None = None) -> None:
         """Emite evento para callbacks registrados."""
         player_event = PlayerEvent(event=event, data=data or {})
         for callback in self._callbacks:

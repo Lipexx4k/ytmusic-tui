@@ -14,10 +14,10 @@ from ytmusic_tui.library.service import library
 
 # O import de yt_dlp é pesado (~0.4s) e não é necessário para abrir a TUI.
 # Carregamos sob demanda e guardamos o módulo para reuso/testes.
-_yt_dlp_module = None
+_yt_dlp_module: Any | None = None
 
 
-def _load_yt_dlp():
+def _load_yt_dlp() -> Any:
     """Importa (uma única vez) e devolve o módulo yt_dlp."""
     global _yt_dlp_module
     if _yt_dlp_module is None:
@@ -64,14 +64,15 @@ class DownloadTask:
     eta: str = ""
     file_path: Path | None = None
     error: str = ""
-    _future: asyncio.Future | None = field(default=None, repr=False)
+    # Forward reference: ``DownloadTask`` ainda está sendo definido aqui.
+    _future: "asyncio.Future[DownloadTask] | None" = field(default=None, repr=False)
     abort_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
 class DownloadManager:
     """Gerencia downloads de músicas do YouTube Music."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._queue: list[DownloadTask] = []
         self._active_downloads: dict[str, DownloadTask] = {}
         self._executor = ThreadPoolExecutor(max_workers=settings.download_concurrent)
@@ -120,7 +121,7 @@ class DownloadManager:
         }
         audio_format = format_map.get(settings.download_format, "bestaudio")
 
-        opts = {
+        opts: dict[str, Any] = {
             "format": audio_format,
             "outtmpl": output_template,
             "noplaylist": True,
@@ -259,11 +260,12 @@ class DownloadManager:
     async def download(self, task: DownloadTask) -> DownloadTask:
         """Inicia download assíncrono."""
         loop = asyncio.get_running_loop()
-        task._future = loop.run_in_executor(self._executor, self._download_task, task)
+        future = loop.run_in_executor(self._executor, self._download_task, task)
+        task._future = future
         self._active_downloads[task.video_id] = task
 
         try:
-            return await task._future
+            return await future
         finally:
             self._active_downloads.pop(task.video_id, None)
 
