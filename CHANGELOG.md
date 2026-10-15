@@ -10,6 +10,8 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 - Auditoria de vulnerabilidades conhecidas (`pip-audit`) nas dependências:
   no CI e nas ferramentas de desenvolvimento
+- Dependabot também para as GitHub Actions do CI (com `checkout` e
+  `setup-python` atualizados para a v7, sem os avisos de depreciação do Node)
 
 ### Corrigido
 

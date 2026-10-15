@@ -1,6 +1,7 @@
 # Atualizações semanais de dependências: cada PR roda o CI (ruff + suíte
-# offline em Python 3.11/3.13), então atualizações problemáticas aparecem
-# na hora — importante com serviços externos que mudam com frequência.
+# offline em Python 3.11/3.13 + pip-audit), então atualizações problemáticas
+# aparecem na hora — importante com serviços externos que mudam com
+# frequência.
 version: 2
 
 updates:
@@ -17,4 +18,15 @@ updates:
       # ...e dependências de runtime uma a uma, para isolar qualquer
       # quebra (ex.: mudança do YouTube que afeta só o yt-dlp)
       runtime:
+        patterns: ["*"]
+
+  # As GitHub Actions do CI também são dependências: mantê-las atualizadas
+  # evita avisos de depreciação de runtime (Node) e furos de segurança.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
         patterns: ["*"]
