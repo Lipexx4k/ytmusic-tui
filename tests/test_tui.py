@@ -1,4 +1,5 @@
 """Smoke test headless da TUI: navegação entre abas e render da busca."""
+import asyncio
 import logging
 
 import pytest
@@ -6,7 +7,7 @@ from textual.widgets import Checkbox, Collapsible, Input, Label, Static, TabbedC
 
 from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
-from ytmusic_tui.download import download_manager
+from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
@@ -865,6 +866,64 @@ async def test_ctrl_d_downloads_even_with_search_input_focused(monkeypatch):
         await pilot.pause()
         assert len(queued) == 1
         assert "Nenhuma faixa em reprodução" in toasts
+
+
+@pytest.mark.asyncio
+async def test_download_failure_shows_toast_with_error(monkeypatch):
+    """Falha de download vira toast com o erro do yt-dlp; a UI segue viva."""
+    app = YTMusicTUI()
+
+    async def _failing_download(task):
+        task.status = DownloadStatus.FAILED
+        task.error = "Video unavailable"
+        return task
+
+    monkeypatch.setattr(download_manager, "download", _failing_download)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        await screen._run_download(DownloadTask(video_id="abc", title="Faixa"))
+
+        assert any("Falha no download" in t and "Video unavailable" in t for t in toasts)
+
+
+@pytest.mark.asyncio
+async def test_quit_with_in_flight_download_does_not_hang(monkeypatch):
+    """Encerrar o app com um download em andamento não pode travar a saída."""
+    app = YTMusicTUI()
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_download(task):
+        started.set()
+        await release.wait()
+        return task
+
+    monkeypatch.setattr(download_manager, "download", _slow_download)
+    monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
+    monkeypatch.setattr(download_manager, "is_active_or_pending", lambda video_id: False)
+    monkeypatch.setattr(
+        download_manager,
+        "queue_download",
+        lambda **kwargs: DownloadTask(video_id="abc", title="Faixa"),
+    )
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        screen._enqueue_download(TrackInfo(video_id="abc", title="Faixa"))
+        await asyncio.wait_for(started.wait(), timeout=5)  # download iniciou
+
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        release.set()  # destrava o worker caso o cancelamento não o pegue
+
+    assert app.return_code == 0
 
 
 if __name__ == "__main__":
