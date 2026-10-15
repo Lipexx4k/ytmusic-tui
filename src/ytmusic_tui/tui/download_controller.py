@@ -49,10 +49,12 @@ class DownloadController:
         for task in all_tasks:
             status_icon = {
                 DownloadStatus.PENDING: "⏳",
-                DownloadStatus.DOWNLOADING: "⬇️",
+                DownloadStatus.RUNNING: "⬇️",
+                DownloadStatus.VALIDATING: "🔎",
                 DownloadStatus.COMPLETED: "✅",
                 DownloadStatus.FAILED: "❌",
                 DownloadStatus.CANCELLED: "🚫",
+                DownloadStatus.INTERRUPTED: "⏸️",
             }.get(task.status, "?")
             table.add_row(
                 status_icon,
@@ -139,7 +141,15 @@ class DownloadController:
         if not track.video_id:
             return False
 
-        if download_manager.is_active_or_pending(track.video_id):
+        # Título/artista/álbum entram na checagem para bloquear também
+        # colisões de caminho final (T02-R5): faixas diferentes que gerariam
+        # o mesmo arquivo não podem baixar em paralelo.
+        if download_manager.is_active_or_pending(
+            track.video_id,
+            title=track.title,
+            artist=track.artist,
+            album=track.album or "",
+        ):
             if notify:
                 self._toast(f"⏳ Já na fila: {track.title}")
             return False
@@ -179,3 +189,5 @@ class DownloadController:
             self._toast(f"❌ Falha no download: {task.error}")
         elif task.status == DownloadStatus.CANCELLED:
             self._toast(f"Download cancelado: {task.title}")
+        # INTERRUPTED não gera toast: só acontece no encerramento do app,
+        # com a TUI já saindo — e a janela some antes de o toast aparecer.

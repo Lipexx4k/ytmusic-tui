@@ -6,6 +6,15 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Alterado
+
+- Downloads usam uma máquina de estados explícita (T02): novos estados
+  "validando" e "interrompido"; cancelar não afeta as outras tarefas e nunca
+  sobrescreve um resultado já finalizado; encerrar o app marca downloads em
+  voo como interrompidos (a retomada completa chega com T04)
+- Faixas diferentes que gerariam o mesmo arquivo final não são mais
+  enfileiradas em paralelo (evita disputa pelo mesmo caminho de saída)
+
 ## [0.1.2] - 2026-10-15
 
 ### Adicionado

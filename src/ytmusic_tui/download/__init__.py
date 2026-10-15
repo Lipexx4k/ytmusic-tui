@@ -1,16 +1,33 @@
 """Gerenciador de downloads usando yt-dlp (import tardio)."""
 
 import asyncio
+import logging
 import re
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from ytmusic_tui.config import settings
+
+# Estados e máquina de transições vivem em `task.py` (T02) e são
+# re-exportados aqui para os imports existentes (TUI, testes).
+from ytmusic_tui.download.task import (
+    ACTIVE_STATUSES,
+    DownloadStatus,
+    DownloadTask,
+    InvalidTransitionError,
+)
 from ytmusic_tui.library.service import library
+
+__all__ = [
+    "DownloadManager",
+    "DownloadStatus",
+    "DownloadTask",
+    "InvalidTransitionError",
+    "download_manager",
+]
+
+logger = logging.getLogger(__name__)
 
 # O import de yt_dlp é pesado (~0.4s) e não é necessário para abrir a TUI.
 # Carregamos sob demanda e guardamos o módulo para reuso/testes.
@@ -40,35 +57,6 @@ def _truncate_bytes(name: str, max_bytes: int) -> str:
     return encoded[:max_bytes].decode("utf-8", errors="ignore").strip(" .")
 
 
-class DownloadStatus(Enum):
-    PENDING = "pending"
-    DOWNLOADING = "downloading"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-@dataclass
-class DownloadTask:
-    """Tarefa de download."""
-
-    video_id: str
-    title: str = ""
-    artist: str = ""
-    album: str = ""
-    thumbnail_url: str = ""
-    track_id: int = 0  # ID na biblioteca local
-    status: DownloadStatus = DownloadStatus.PENDING
-    progress: float = 0.0
-    speed: str = ""
-    eta: str = ""
-    file_path: Path | None = None
-    error: str = ""
-    # Forward reference: ``DownloadTask`` ainda está sendo definido aqui.
-    _future: "asyncio.Future[DownloadTask] | None" = field(default=None, repr=False)
-    abort_event: threading.Event = field(default_factory=threading.Event, repr=False)
-
-
 class DownloadManager:
     """Gerencia downloads de músicas do YouTube Music."""
 
@@ -78,7 +66,11 @@ class DownloadManager:
         self._executor = ThreadPoolExecutor(max_workers=settings.download_concurrent)
 
     def set_concurrent(self, workers: int) -> None:
-        """Recria o executor com novo limite de downloads simultâneos."""
+        """Recria o executor com novo limite de downloads simultâneos.
+
+        Tarefas já enviadas ao executor antigo seguem nele (``wait=False``
+        sem ``cancel_futures``); novas submissões usam o executor novo.
+        """
         workers = max(1, min(10, workers))
         old = self._executor
         self._executor = ThreadPoolExecutor(max_workers=workers)
@@ -196,11 +188,14 @@ class DownloadManager:
         """Hook de progresso do yt-dlp (roda na thread do executor)."""
         if task.abort_event.is_set():
             # Qualquer exceção em um progress hook aborta o download.
+            # É o ponto de observação do cancelamento (T02-R3).
             raise RuntimeError("Download cancelado")
 
         status = data.get("status")
         if status == "downloading":
-            task.status = DownloadStatus.DOWNLOADING
+            # O estado RUNNING é definido pelo worker antes de chamar o
+            # yt-dlp; aqui só atualizamos progresso/velocidade/ETA (T02-R6:
+            # a UI lê estado, nunca escreve).
             percent = str(data.get("_percent_str", "0%"))
             try:
                 task.progress = float(percent.replace("%", "").strip())
@@ -213,48 +208,102 @@ class DownloadManager:
             # está por vir — o status final é definido em _download_task.
             task.progress = 100.0
 
-    def _download_task(self, task: DownloadTask) -> DownloadTask:
-        """Executa download em thread separada."""
-        task.status = DownloadStatus.DOWNLOADING
-        yt_dlp = _load_yt_dlp()
+    def _validated_final_path(self, task: DownloadTask) -> Path | None:
+        """Caminho final validado (existe e não está vazio) ou ``None``.
 
+        Validação mínima do T02: a completa (extensão == formato, tamanho
+        plausível, temporário→destino, anti-sobrescrita) é o pipeline de T03
+        — mas sem esta checagem barata o app poderia declarar sucesso falso
+        (INV-1; §4.2 "arquivo existe, não vazio").
+        """
+        path = task.file_path
+        if path is None:
+            return None
+        try:
+            return path if path.is_file() and path.stat().st_size > 0 else None
+        except OSError:
+            # Ilegível/inacessível conta como inválido (VALIDATING → FAILED).
+            return None
+
+    @staticmethod
+    def _set_failed(task: DownloadTask, error: str) -> None:
+        """Marca FAILED se a máquina permitir; nunca sobrescreve terminal.
+
+        Em corrida com cancelamento/shutdown (que fecham a tarefa antes), a
+        transição já não é válida e o estado final existente é preservado.
+        """
+        if task.can_transition_to(DownloadStatus.FAILED):
+            task.error = error
+            task.transition_to(DownloadStatus.FAILED)
+
+    @staticmethod
+    def _finish_cancelled(task: DownloadTask) -> None:
+        """Fecha como CANCELLED se a máquina permitir (não sobrescreve terminal)."""
+        if task.can_transition_to(DownloadStatus.CANCELLED):
+            task.error = "Cancelado"
+            task.transition_to(DownloadStatus.CANCELLED)
+
+    def _download_task(self, task: DownloadTask) -> DownloadTask:
+        """Executa o download em thread separada, por transições da §4.2."""
+        # Cancelada na fila ou interrompida pelo shutdown antes de começar:
+        # o estado final já existe — o worker apenas encerra.
+        if not task.can_transition_to(DownloadStatus.RUNNING):
+            return task
+        task.transition_to(DownloadStatus.RUNNING)
+
+        yt_dlp = _load_yt_dlp()
         url = f"https://music.youtube.com/watch?v={task.video_id}"
 
         try:
             with yt_dlp.YoutubeDL(self._get_ydl_options(task)) as ydl:
                 ydl.download([url])
-
-            if task.abort_event.is_set():
-                task.status = DownloadStatus.CANCELLED
-                task.error = "Cancelado"
-            elif task.file_path and task.file_path.exists():
-                if task.track_id:
-                    file_size = task.file_path.stat().st_size
-                    library.update_track_file(
-                        task.track_id,
-                        task.file_path,
-                        file_size,
-                        settings.download_format,
-                        int(settings.download_quality)
-                        if settings.download_quality.isdigit()
-                        else 320,
-                    )
-                task.status = DownloadStatus.COMPLETED
-            else:
-                task.status = DownloadStatus.FAILED
-                task.error = "Arquivo final não encontrado após o download"
-
         except Exception as e:
             if task.abort_event.is_set():
-                task.status = DownloadStatus.CANCELLED
-                task.error = "Cancelado"
+                # Cancelamento (usuário) ou encerramento (shutdown): quem
+                # sinalizou marca o estado; aqui só fechamos se ninguém fechou.
+                self._finish_cancelled(task)
             elif isinstance(e, yt_dlp.utils.DownloadError):
-                task.status = DownloadStatus.FAILED
-                task.error = str(e)
+                self._set_failed(task, str(e))
             else:
-                task.status = DownloadStatus.FAILED
-                task.error = f"Erro inesperado: {e}"
+                logger.exception(
+                    "Erro inesperado no download %s (vídeo %s)", task.id, task.video_id
+                )
+                self._set_failed(task, f"Erro inesperado: {e}")
+            return task
 
+        # yt-dlp terminou sem exceção. Corrida conhecida: um cancelamento/
+        # encerramento entre o fim do yt-dlp e a validação já definiu o
+        # estado final — nunca sobrescrever (CANCELLED ≠ COMPLETED, §4.4).
+        if not task.can_transition_to(DownloadStatus.VALIDATING):
+            return task
+        task.transition_to(DownloadStatus.VALIDATING)
+
+        final_path = self._validated_final_path(task)
+        if final_path is None:
+            self._set_failed(task, "Arquivo final ausente ou vazio após o download")
+            return task
+
+        if task.track_id:
+            try:
+                library.update_track_file(
+                    task.track_id,
+                    final_path,
+                    final_path.stat().st_size,
+                    settings.download_format,
+                    int(settings.download_quality) if settings.download_quality.isdigit() else 320,
+                )
+            except Exception as e:
+                # O arquivo fica no disco sem registro (risco §1.3): falha
+                # explícita, nunca COMPLETED; a reconciliação/quarentena do
+                # arquivo órfão é T03/T04.
+                logger.exception("Falha ao registrar %s na biblioteca", task.id)
+                self._set_failed(task, f"Falha ao registrar na biblioteca: {e}")
+                return task
+
+        if not task.can_transition_to(DownloadStatus.COMPLETED):
+            # Interrompida durante a validação (ex.: shutdown): já é terminal.
+            return task
+        task.transition_to(DownloadStatus.COMPLETED)
         return task
 
     async def download(self, task: DownloadTask) -> DownloadTask:
@@ -291,18 +340,30 @@ class DownloadManager:
         return task
 
     def cancel_download(self, video_id: str) -> bool:
-        """Cancela download ativo ou pendente."""
+        """Cancela um download pendente ou em execução (§4.2).
+
+        Contrato: só ``PENDING``/``RUNNING`` são canceláveis — em
+        ``VALIDATING`` a janela é curta e cancelar naquele ponto deixaria o
+        arquivo publicado sem registro (INV-2); estados terminais não têm o
+        que cancelar. Nesses casos retorna ``False`` sem alterar nada.
+
+        O ``abort_event`` é observado pelo yt-dlp **no próximo
+        ``progress_hook``** (T02-R3): a latência máxima até o processo parar
+        de fato depende do intervalo entre chunks do yt-dlp (sem limite
+        formal garantido por ele; o teste com fake determinístico fixa o
+        contrato em ~1 tick).
+        """
         task = self._active_downloads.get(video_id)
         if task is None:
             for queued in self._queue:
                 if queued.video_id == video_id:
                     task = queued
                     break
-        if task is None:
+        if task is None or not task.can_transition_to(DownloadStatus.CANCELLED):
             return False
 
         task.abort_event.set()
-        task.status = DownloadStatus.CANCELLED
+        task.transition_to(DownloadStatus.CANCELLED)
         task.error = "Cancelado"
         if task in self._queue and task not in self._active_downloads.values():
             self._queue.remove(task)
@@ -316,36 +377,58 @@ class DownloadManager:
         """Retorna downloads ativos."""
         return list(self._active_downloads.values())
 
-    def is_active_or_pending(self, video_id: str) -> bool:
-        """True se o vídeo já está baixando ou aguardando na fila.
+    def is_active_or_pending(
+        self,
+        video_id: str,
+        *,
+        title: str = "",
+        artist: str = "",
+        album: str = "",
+    ) -> bool:
+        """True se o vídeo já está em voo — ou colidiria no arquivo final.
 
         Evita enfileirar o mesmo vídeo duas vezes: dois downloads simultâneos
-        disputariam o mesmo arquivo de saída (e o mesmo ``.part``).
+        disputariam o mesmo arquivo de saída (e o mesmo ``.part``). Com
+        título/artista/álbum informados, bloqueia também **colisões de
+        caminho final** (faixas diferentes com o mesmo nome sanitizado —
+        T02-R5); a reserva definitiva de caminho entra com o pipeline de T03.
         """
         if video_id in self._active_downloads:
             return True
+        if any(t.video_id == video_id and t.status in ACTIVE_STATUSES for t in self._queue):
+            return True
+
+        if not (title or artist or album):
+            return False
+        candidate = DownloadTask(video_id=video_id, title=title, artist=artist, album=album)
+        template = self._get_output_template(candidate)
         return any(
-            task.video_id == video_id
-            and task.status in (DownloadStatus.PENDING, DownloadStatus.DOWNLOADING)
-            for task in self._queue
+            t.status in ACTIVE_STATUSES and self._get_output_template(t) == template
+            for t in self._queue
         )
 
     def clear_completed(self) -> None:
-        """Remove downloads concluídos/cancelados da fila."""
-        self._queue = [
-            t
-            for t in self._queue
-            if t.status
-            not in (DownloadStatus.COMPLETED, DownloadStatus.CANCELLED, DownloadStatus.FAILED)
-        ]
+        """Remove da lista as tarefas em estado final (§4.2).
+
+        Inclui ``INTERRUPTED``. Nenhum arquivo é tocado aqui: limpeza de
+        ``.part``/temporários exige política própria e é T04-R2 (§5.3) —
+        este método só encolhe a fila em memória.
+        """
+        self._queue = [t for t in self._queue if not t.is_terminal]
 
     def shutdown(self) -> None:
-        """Encerra gerenciador sem bloquear a saída do app."""
-        # Sinaliza aborto; os hooks de progresso interrompem os downloads
-        # rapidamente. Evita também que o interpretador espere threads
-        # de download em andamento.
+        """Encerra o gerenciador sem bloquear a saída do app (T02-R4).
+
+        Tarefas em voo viram ``INTERRUPTED`` (o gatilho da §4.2): o worker
+        coopera com o ``abort_event`` e sai sem sobrescrever o estado. O
+        executor não é aguardado — o teste com fake cooperativo verifica que
+        nenhuma thread continua viva (a latência de saída é a mesma do
+        cancelamento: o próximo ``progress_hook``).
+        """
         for task in self._active_downloads.values():
             task.abort_event.set()
+            if task.can_transition_to(DownloadStatus.INTERRUPTED):
+                task.transition_to(DownloadStatus.INTERRUPTED)
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 

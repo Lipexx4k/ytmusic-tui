@@ -483,7 +483,7 @@ async def test_repeated_download_is_skipped_while_in_progress(monkeypatch):
         monkeypatch.setattr(
             download_manager,
             "is_active_or_pending",
-            lambda video_id: video_id in in_flight,
+            lambda video_id, **kwargs: video_id in in_flight,
         )
 
         async def _noop(task):  # noqa: ANN001 - worker fake
@@ -529,7 +529,7 @@ async def test_download_album_reports_tracks_in_progress(monkeypatch):
         monkeypatch.setattr(
             download_manager,
             "is_active_or_pending",
-            lambda video_id: True,
+            lambda video_id, **kwargs: True,
         )
         toasts: list[str] = []
         monkeypatch.setattr(screen, "_toast", toasts.append)
@@ -875,7 +875,9 @@ async def test_download_failure_shows_toast_with_error(monkeypatch):
     app = YTMusicTUI()
 
     async def _failing_download(task):
-        task.status = DownloadStatus.FAILED
+        # Só transições válidas: o status é escrito pela máquina, nunca à mão.
+        task.transition_to(DownloadStatus.RUNNING)
+        task.transition_to(DownloadStatus.FAILED)
         task.error = "Video unavailable"
         return task
 
@@ -906,7 +908,7 @@ async def test_quit_with_in_flight_download_does_not_hang(monkeypatch):
 
     monkeypatch.setattr(download_manager, "download", _slow_download)
     monkeypatch.setattr(library, "ensure_track", lambda **kwargs: 1)
-    monkeypatch.setattr(download_manager, "is_active_or_pending", lambda video_id: False)
+    monkeypatch.setattr(download_manager, "is_active_or_pending", lambda video_id, **kwargs: False)
     monkeypatch.setattr(
         download_manager,
         "queue_download",
