@@ -15,6 +15,8 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ### Corrigido
 
+- Selo de testes no README: dizia 55, mas a suíte tem 61 testes passando
+  (valor conferido com `pytest` em ambiente limpo, como manda o manual)
 - Nomes de arquivo com muitos caracteres multibyte (acentos, CJK, emoji)
   agora são cortados também por bytes (limite de 255 bytes por componente do
   filesystem), evitando falha do download por nome longo

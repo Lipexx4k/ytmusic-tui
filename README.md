@@ -4,7 +4,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-55%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-61%20passando-brightgreen)
 ![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
