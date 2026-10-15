@@ -4,6 +4,16 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
 O formato segue livremente o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Corrigido
+
+- Falha ao carregar a biblioteca local não parece mais uma "biblioteca vazia":
+  o erro aparece na aba 📚 (com a mensagem padrão preservada para quando o
+  carregamento voltar a funcionar) e é registrado no log da aplicação
+- Logging em arquivo (novo): gravado com rotação em `~/.local/state/ytmusic-tui/log/`
+  no Linux — nunca no stderr, que sujaria a TUI
+
 ## [0.1.0] - 2026-10-15
 
 Primeira versão publicada. 🎉

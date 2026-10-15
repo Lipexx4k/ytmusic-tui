@@ -10,7 +10,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **55 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **58 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -252,8 +252,13 @@ YTMUSIC_DOWNLOAD_DIR=/tmp/teste YTMUSIC_DATA_DIR=/tmp/teste ytmusic-tui
 | Biblioteca (SQLite) | `~/.local/share/ytmusic-tui/library.db` |
 | Cache | `~/.cache/ytmusic-tui/` |
 | Downloads | `~/Music/YouTube Music/` |
+| Log | `~/.local/state/ytmusic-tui/log/ytmusic-tui.log` |
 
 *(Em macOS/Windows são usados os caminhos equivalentes do `platformdirs`.)*
+
+Erros internos (por exemplo, falha ao acessar o banco da biblioteca) aparecem
+na própria interface **e** são registrados no log acima — útil para investigar
+ou anexar a uma issue.
 
 ## 🔧 Como funciona (por dentro)
 
@@ -283,7 +288,7 @@ YTMUSIC_DOWNLOAD_DIR=/tmp/teste YTMUSIC_DATA_DIR=/tmp/teste ytmusic-tui
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 55 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 58 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -300,8 +305,9 @@ ytmusic-tui/
 │   ├── player/                # Player mpv (libmpv) + integração com yt-dlp
 │   ├── download/              # Fila de downloads yt-dlp (progresso, concorrência)
 │   ├── library/               # Biblioteca SQLite (SQLAlchemy)
+│   ├── log.py                 # Logging em arquivo (com rotação)
 │   └── tui/                   # Interface Textual (app.py + app.tcss)
-└── tests/                     # 55 testes offline (pytest) + integração opt-in
+└── tests/                     # 58 testes offline (pytest) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento

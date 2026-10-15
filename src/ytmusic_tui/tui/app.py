@@ -1,6 +1,7 @@
 """Aplicação TUI principal usando Textual."""
 import asyncio
 import contextlib
+import logging
 import threading
 import time
 from pathlib import Path
@@ -33,7 +34,17 @@ from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import db_manager, library
 from ytmusic_tui.library.models import Track
+from ytmusic_tui.log import log_file_path, setup_logging
 from ytmusic_tui.player import PlayerEvent, PlayerState, TrackInfo, player
+
+logger = logging.getLogger(__name__)
+
+# Texto padrão da aba Biblioteca quando não há faixas carregadas (usado
+# também para restaurá-lo depois de uma falha de carregamento).
+_LIBRARY_EMPTY_TEXT = (
+    "Nenhuma faixa na biblioteca local ainda.\n"
+    "Baixe músicas com Ctrl+D durante a reprodução."
+)
 
 # ===== Widgets Customizados =====
 
@@ -301,11 +312,7 @@ class MainScreen(Screen):
             with TabPane("📚 Biblioteca", id="tab-library"):
                 yield Static("[b]📚 Biblioteca local[/b]", classes="section-title")
                 with Vertical(id="library-body"):
-                    yield Static(
-                        "Nenhuma faixa na biblioteca local ainda.\n"
-                        "Baixe músicas com Ctrl+D durante a reprodução.",
-                        id="library-message",
-                    )
+                    yield Static(_LIBRARY_EMPTY_TEXT, id="library-message")
                     yield TrackListView(id="library-list")
 
             with TabPane("📥 Downloads", id="tab-downloads"):
@@ -382,7 +389,12 @@ class MainScreen(Screen):
         self.update_downloads_table()
 
     def refresh_library(self) -> None:
-        """Atualiza a lista de faixas da biblioteca local (in-place)."""
+        """Atualiza a lista de faixas da biblioteca local (in-place).
+
+        Uma falha ao consultar o banco NÃO pode parecer uma biblioteca
+        vazia: o usuário acharia que perdeu as faixas baixadas. O erro é
+        registrado no log e mostrado na própria aba.
+        """
         try:
             view = self.query_one("#library-list", TrackListView)
             message = self.query_one("#library-message", Static)
@@ -391,12 +403,23 @@ class MainScreen(Screen):
 
         try:
             tracks = library.get_recent_tracks(limit=500)
-        except Exception:
-            tracks = []
+        except Exception as error:
+            logger.exception("Falha ao carregar a biblioteca local")
+            view.set_tracks([])
+            view.display = False
+            message.update(
+                "[b]⚠️ Não foi possível carregar a biblioteca local[/b]\n"
+                f"{escape(str(error))}\n"
+                f"Nada foi apagado. Detalhes no log: {escape(str(log_file_path()))}"
+            )
+            message.display = True
+            self._toast("⚠️ Falha ao carregar a biblioteca local — detalhes no log")
+            return
 
         view.set_tracks(tracks)
         view.display = bool(tracks)
         message.display = not tracks
+        message.update(_LIBRARY_EMPTY_TEXT)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Atualiza o conteúdo da aba ao ser ativada."""
@@ -1082,6 +1105,12 @@ class YTMusicTUI(App):
 
 def main():
     """Ponto de entrada principal."""
+    try:
+        setup_logging()
+    except OSError:
+        # Sem permissão para gravar o log, o app segue funcionando; o
+        # NullHandler evita que mensagens caiam no stderr e sujem a TUI.
+        logging.getLogger("ytmusic_tui").addHandler(logging.NullHandler())
     app = YTMusicTUI()
     app.run()
 

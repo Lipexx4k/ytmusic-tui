@@ -1,4 +1,6 @@
 """Smoke test headless da TUI: navegação entre abas e render da busca."""
+import logging
+
 import pytest
 from textual.widgets import Checkbox, Collapsible, Input, Label, Static, TabbedContent, Tabs
 
@@ -572,6 +574,84 @@ async def test_library_refresh_twice_with_tracks(monkeypatch):
         assert len(view.children) == 2
         assert view.display  # lista visível
         assert not screen.query_one("#library-message", Static).display
+
+
+@pytest.mark.asyncio
+async def test_library_load_error_is_shown_not_empty(monkeypatch, caplog):
+    """Regressão: erro ao carregar a biblioteca não pode parecer "vazia".
+
+    Antes, qualquer exceção virava uma lista vazia — quem estivesse com o
+    banco inacessível acharia que perdeu as faixas baixadas.
+    """
+
+    class _BrokenLibrary:
+        def get_recent_tracks(self, limit=500):
+            raise RuntimeError("banco inacessível [Errno 5]")
+
+    monkeypatch.setattr(app_module, "library", _BrokenLibrary())
+    app = YTMusicTUI()
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            message = screen.query_one("#library-message", Static)
+
+            assert message.display is True
+            rendered = str(message.render())
+            assert "Não foi possível carregar a biblioteca" in rendered
+            assert "banco inacessível [Errno 5]" in rendered  # colchetes ok
+            # A mensagem de "biblioteca vazia" não pode aparecer no lugar
+            assert "Nenhuma faixa na biblioteca local ainda" not in rendered
+            assert screen.query_one("#library-list", TrackListView).display is False
+
+    # O erro fica registrado no log (nível ERROR, com a exceção)
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+    assert any(
+        "Falha ao carregar a biblioteca local" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_library_recovers_after_load_error(monkeypatch, caplog):
+    """Depois de uma falha, um refresh com sucesso restaura lista e texto padrão."""
+
+    class _Track:
+        id = 1
+        source_id = "vid1"
+        title = "Faixa"
+        artist_names = ["Artista"]
+        is_downloaded = False
+        local_path = None
+        album = None
+
+    class _FlakyLibrary:
+        fail = True
+
+        def get_recent_tracks(self, limit=500):
+            if self.fail:
+                raise RuntimeError("boom")
+            return [_Track()]
+
+    flaky = _FlakyLibrary()
+    monkeypatch.setattr(app_module, "library", flaky)
+    app = YTMusicTUI()
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            message = screen.query_one("#library-message", Static)
+            assert "Não foi possível carregar" in str(message.render())
+
+            flaky.fail = False
+            screen.refresh_library()
+            await pilot.pause()
+
+            assert "Nenhuma faixa na biblioteca local ainda" in str(message.render())
+            assert message.display is False
+            view = screen.query_one("#library-list", TrackListView)
+            assert view.display is True
+            assert len(view.children) == 1
 
 
 def test_bindings_resolve_to_actions():
