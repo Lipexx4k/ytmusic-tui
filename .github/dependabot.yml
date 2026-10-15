@@ -1,0 +1,20 @@
+# Atualizações semanais de dependências: cada PR roda o CI (ruff + suíte
+# offline em Python 3.11/3.13), então atualizações problemáticas aparecem
+# na hora — importante com serviços externos que mudam com frequência.
+version: 2
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      # Ferramentas de desenvolvimento juntas (baixo risco)...
+      dev:
+        dependency-type: "development"
+      # ...e dependências de runtime uma a uma, para isolar qualquer
+      # quebra (ex.: mudança do YouTube que afeta só o yt-dlp)
+      runtime:
+        patterns: ["*"]

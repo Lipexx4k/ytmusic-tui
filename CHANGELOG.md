@@ -6,6 +6,18 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Adicionado
+
+- Dependabot semanal para as dependências Python (PRs testadas pelo CI;
+  runtime e ferramentas de dev em grupos separados)
+
+### Alterado
+
+- A TUI foi dividida em módulos menores: `tui/screens.py` (tela principal),
+  `tui/widgets.py` (widgets) e controllers de reprodução, downloads e
+  biblioteca — o `app.py` ficou com o ciclo de vida do app e o `main()`
+  (sem mudança de comportamento)
+
 ### Corrigido
 
 - Falha ao carregar a biblioteca local não parece mais uma "biblioteca vazia":

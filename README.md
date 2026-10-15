@@ -10,7 +10,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **58 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **60 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -288,7 +288,7 @@ ou anexar a uma issue.
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 58 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 60 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -306,8 +306,12 @@ ytmusic-tui/
 │   ├── download/              # Fila de downloads yt-dlp (progresso, concorrência)
 │   ├── library/               # Biblioteca SQLite (SQLAlchemy)
 │   ├── log.py                 # Logging em arquivo (com rotação)
-│   └── tui/                   # Interface Textual (app.py + app.tcss)
-└── tests/                     # 58 testes offline (pytest) + integração opt-in
+│   └── tui/                   # Interface Textual
+│       ├── app.py             # Ciclo de vida do app + main() (app.tcss ao lado)
+│       ├── screens.py         # MainScreen: abas, atalhos e navegação
+│       ├── widgets.py         # Widgets personalizados (listas, barra do player)
+│       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
+└── tests/                     # 60 testes offline (pytest) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento
@@ -337,6 +341,10 @@ YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
 Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
 
 O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push.
+
+As dependências são atualizadas pelo **Dependabot** (PRs semanais): o CI roda em cada PR, então
+uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende
+de serviços externos que mudam com frequência (YouTube, mpv, yt-dlp).
 
 **Ambiente de desenvolvimento/teste do autor** (LMDE 7): Python 3.13.5 · mpv 0.40.0 (libmpv) · ffmpeg 7.1.5 · textual 8.2.8 · ytmusicapi 1.12.3 · yt-dlp 2026.8.19 · SQLAlchemy 2.1.4.
 
