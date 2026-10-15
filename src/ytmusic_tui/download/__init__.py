@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,10 @@ from ytmusic_tui.download.pipeline import (
     validate_input,
     validate_media_file,
 )
+
+# Espelho persistido das tarefas (T04-R1): pista de recuperação para a
+# próxima execução. Falha de escrita nunca quebra o download (ver `_persist`).
+from ytmusic_tui.download.store import DownloadTaskStore
 
 # Estados e máquina de transições vivem em `task.py` (T02) e são
 # re-exportados aqui para os imports existentes (TUI, testes).
@@ -73,10 +78,33 @@ def _truncate_bytes(name: str, max_bytes: int) -> str:
 class DownloadManager:
     """Gerencia downloads de músicas do YouTube Music."""
 
-    def __init__(self) -> None:
+    def __init__(self, store: DownloadTaskStore | None = None) -> None:
         self._queue: list[DownloadTask] = []
         self._active_downloads: dict[str, DownloadTask] = {}
         self._executor = ThreadPoolExecutor(max_workers=settings.download_concurrent)
+        # Espelho persistido (T04-R1): injetável para testes; a instância
+        # global usa o banco da biblioteca.
+        self._store = store or DownloadTaskStore()
+
+    def _persist(self, label: str, action: Callable[[], None]) -> None:
+        """Executa uma gravação best-effort do espelho de estado (T04-R1).
+
+        O estado persistido é uma **pista de recuperação**, não a fonte de
+        verdade: falha de escrita (banco travado, disco cheio) nunca quebra
+        o download nem fabrica sucesso falso — fica no log, nunca em
+        silêncio. A inicialização seguinte trata a linha que sobrar.
+        """
+        try:
+            action()
+        except Exception:
+            logger.warning("Falha ao persistir %s (download segue)", label, exc_info=True)
+
+    def _persist_status(self, task: DownloadTask) -> None:
+        """Persiste o status atual da tarefa (após uma transição da máquina)."""
+        self._persist(
+            f"status {task.status.value} de {task.id}",
+            lambda: self._store.update_status(task.id, task.status),
+        )
 
     def set_concurrent(self, workers: int) -> None:
         """Recria o executor com novo limite de downloads simultâneos.
@@ -322,6 +350,7 @@ class DownloadManager:
         if not task.can_transition_to(DownloadStatus.RUNNING):
             return task
         task.transition_to(DownloadStatus.RUNNING)
+        self._persist_status(task)
 
         download_dir = settings.download_dir
         try:
@@ -342,6 +371,7 @@ class DownloadManager:
             if not task.can_transition_to(DownloadStatus.VALIDATING):
                 return task
             task.transition_to(DownloadStatus.VALIDATING)
+            self._persist_status(task)
             return self._adopt_existing_file(task, final_path)
 
         try:
@@ -379,6 +409,7 @@ class DownloadManager:
             if not task.can_transition_to(DownloadStatus.VALIDATING):
                 return task
             task.transition_to(DownloadStatus.VALIDATING)
+            self._persist_status(task)
 
             try:
                 temp = validate_media_file(task.file_path, settings.download_format)
@@ -422,6 +453,15 @@ class DownloadManager:
             return await future
         finally:
             self._active_downloads.pop(task.video_id, None)
+            # Terminais da sessão não deixam linha: o resultado vive na
+            # memória/UI; a linha só existe para a próxima execução saber que
+            # o trabalho ficou pela metade (INTERRUPTED — essa fica).
+            if task.status in (
+                DownloadStatus.COMPLETED,
+                DownloadStatus.FAILED,
+                DownloadStatus.CANCELLED,
+            ):
+                self._persist(f"remoção da linha de {task.id}", lambda: self._store.delete(task.id))
 
     def queue_download(
         self,
@@ -442,6 +482,17 @@ class DownloadManager:
             track_id=track_id,
         )
         self._queue.append(task)
+        # Persistir a intenção de baixar ANTES de começar (T04-R1): se o app
+        # morrer entre enfileirar e terminar, a linha vira a pista da próxima
+        # execução. O caminho final é derivado agora (o template não muda).
+        self._persist(
+            f"tarefa na fila ({task.id})",
+            lambda: self._store.save(
+                task,
+                download_dir=settings.download_dir,
+                final_path=self._final_path_for(task),
+            ),
+        )
         return task
 
     def cancel_download(self, video_id: str) -> bool:
@@ -472,6 +523,9 @@ class DownloadManager:
         task.error = "Cancelado"
         if task in self._queue and task not in self._active_downloads.values():
             self._queue.remove(task)
+        # Terminal: a linha persistida some (se o worker ainda estiver em
+        # voo, o `finally` de `download()` repete a remoção — idempotente).
+        self._persist(f"remoção da linha de {task.id}", lambda: self._store.delete(task.id))
         return True
 
     def get_queue(self) -> list[DownloadTask]:
@@ -534,6 +588,9 @@ class DownloadManager:
             task.abort_event.set()
             if task.can_transition_to(DownloadStatus.INTERRUPTED):
                 task.transition_to(DownloadStatus.INTERRUPTED)
+                # A linha fica: é ela que a próxima execução vai listar como
+                # "aguardando decisão" (T04-R2) — nunca limpar aqui.
+                self._persist_status(task)
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 

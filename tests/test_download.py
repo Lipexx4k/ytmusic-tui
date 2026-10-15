@@ -26,6 +26,7 @@ E o pipeline de publicação do T03 (§5.1–§5.2):
 """
 
 import asyncio
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -37,6 +38,8 @@ import ytmusic_tui.download as download_mod
 import ytmusic_tui.download.pipeline as pipeline_mod
 from ytmusic_tui.download import DownloadStatus, DownloadTask
 from ytmusic_tui.download.pipeline import release, reserve
+from ytmusic_tui.download.store import DownloadTaskStore
+from ytmusic_tui.library.database import DatabaseManager
 
 
 class _FakeDownloadError(Exception):
@@ -192,8 +195,29 @@ def _walk_to_status(task: DownloadTask, final: DownloadStatus) -> None:
 
 
 @pytest.fixture
-def manager(monkeypatch, tmp_path):
-    """DownloadManager com settings isoladas e yt-dlp falso."""
+def temp_db():
+    """Banco temporário para o espelho de tarefas (T04)."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as handle:
+        db_path = Path(handle.name)
+
+    db_manager = DatabaseManager(db_path)
+    db_manager.create_all()
+
+    yield db_manager
+
+    db_manager.close()
+    db_path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def store(temp_db) -> DownloadTaskStore:
+    """Store isolado: os testes nunca tocam o banco real do usuário."""
+    return DownloadTaskStore(db=temp_db)
+
+
+@pytest.fixture
+def manager(monkeypatch, tmp_path, store):
+    """DownloadManager com settings isoladas, yt-dlp falso e store temporário."""
     fake_settings = SimpleNamespace(
         download_dir=tmp_path,
         download_format="mp3",
@@ -203,7 +227,7 @@ def manager(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(download_mod, "settings", fake_settings)
     monkeypatch.setattr(download_mod, "_load_yt_dlp", lambda: _FakeYtDlp)
-    return download_mod.DownloadManager()
+    return download_mod.DownloadManager(store=store)
 
 
 def test_ydl_options_are_silent_and_embed_metadata(manager):
@@ -842,6 +866,78 @@ def test_second_task_for_same_destination_fails_busy(manager, monkeypatch, tmp_p
         assert not final.exists()
     finally:
         release(reservation)
+
+
+# ===== T04-R1: espelho persistido do ciclo de vida da tarefa =====
+
+
+def test_queue_download_persists_row_before_starting(manager, store, tmp_path):
+    """Enfileirar grava a pista (PENDING) com os caminhos da tarefa."""
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+
+    row = store.find(task.id)
+    assert row is not None
+    assert row.status == DownloadStatus.PENDING.value
+    assert row.video_id == "abc"
+    assert row.final_path == str(tmp_path / "A" / "Alb" / "T - A.mp3")
+    # download_dir persistido junto: o pai do final não é o download_dir (§5.3)
+    assert row.download_dir == str(tmp_path)
+
+
+def test_worker_persists_running_then_validating(manager, store, monkeypatch):
+    """O espelho acompanha as transições da máquina (RUNNING → VALIDATING)."""
+    seen: list[str] = []
+    original = store.update_status
+
+    def _record(task_id: str, status: DownloadStatus) -> None:
+        seen.append(status.value)
+        original(task_id, status)
+
+    monkeypatch.setattr(store, "update_status", _record)
+    monkeypatch.setattr(download_mod.library, "update_track_file", lambda *args, **kwargs: None)
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb", track_id=7)
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.COMPLETED
+    assert seen == [DownloadStatus.RUNNING.value, DownloadStatus.VALIDATING.value]
+
+
+@pytest.mark.asyncio
+async def test_terminal_download_removes_persisted_row(manager, store, monkeypatch):
+    """Terminal da sessão não deixa linha: o resultado é da memória/UI."""
+    monkeypatch.setattr(download_mod.library, "update_track_file", lambda *args, **kwargs: None)
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb", track_id=7)
+    assert store.find(task.id) is not None
+
+    result = await manager.download(task)
+
+    assert result.status is DownloadStatus.COMPLETED
+    assert store.find(task.id) is None
+
+
+def test_cancel_removes_persisted_row(manager, store):
+    """Cancelar uma tarefa enfileirada remove a linha na hora."""
+    task = manager.queue_download(video_id="abc", title="T")
+    assert store.find(task.id) is not None
+
+    assert manager.cancel_download("abc") is True
+
+    assert store.find(task.id) is None
+
+
+def test_shutdown_keeps_interrupted_row(manager, store):
+    """INTERRUPTED é a única linha que fica: é a pista da próxima execução."""
+    task = manager.queue_download(video_id="abc", title="T")
+    manager._active_downloads[task.video_id] = task
+    task.transition_to(DownloadStatus.RUNNING)
+
+    manager.shutdown()
+
+    row = store.find(task.id)
+    assert row is not None
+    assert row.status == DownloadStatus.INTERRUPTED.value
 
 
 if __name__ == "__main__":

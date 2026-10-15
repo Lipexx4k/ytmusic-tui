@@ -260,3 +260,42 @@ class UserSettings(Base):
 
     def __repr__(self) -> str:
         return f"<UserSetting(key='{self.key}', value='{self.value[:50]}')>"
+
+
+class DownloadTaskRecord(Base):
+    """Espelho persistido das tarefas de download em voo/interrompidas (T04-R1).
+
+    Tabela **nova** (a criação via ``create_all`` não exige migração — o
+    versionamento de esquema entra no T05); nenhuma coluna é adicionada às
+    tabelas existentes. A verdade da biblioteca continua em ``tracks``:
+    aqui só vivem os campos necessários para (a) detectar na próxima
+    execução que um trabalho ficou pela metade e (b) localizar os
+    temporários da tarefa — ``download_dir`` + ``final_path`` permitem
+    derivar ``.tmp/<chave>.*`` e ``<final>.part`` (§5.3/T04).
+
+    ``track_id`` é um inteiro solto (sem FK): a linha pode sobreviver a um
+    intervalo em que a faixa ainda não existe (registro é o passo 7 do
+    §5.1) e não queremos cascata apagando a pista de recuperação.
+    """
+
+    __tablename__ = "download_tasks"
+
+    task_id = Column(String(64), primary_key=True)
+    video_id = Column(String(100), nullable=False, default="")
+    title = Column(String(255), nullable=False, default="")
+    artist = Column(String(255), nullable=False, default="")
+    album = Column(String(255), nullable=False, default="")
+    thumbnail_url = Column(String(500), nullable=False, default="")
+    track_id = Column(Integer, nullable=False, default=0)
+    # Caminhos completos (Text: não são nomes limitados a 255 caracteres).
+    final_path = Column(Text, nullable=False, default="")
+    download_dir = Column(Text, nullable=False, default="")
+    # Valores de ``DownloadStatus`` como string (StrEnum); não SQLEnum para
+    # que novos estados da máquina não exijam migração de tipo.
+    status = Column(String(20), nullable=False, index=True)
+    retry_of = Column(String(64), nullable=False, default="")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    def __repr__(self) -> str:
+        return f"<DownloadTaskRecord(task_id='{self.task_id}', status='{self.status}')>"

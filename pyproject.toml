@@ -86,10 +86,11 @@ ignore_missing_imports = true
 # Dívida conhecida (planejada em T05 do plano de engenharia): os modelos usam
 # `Column[...]` clássico e o mypy — sem o plugin do SQLAlchemy, removido no
 # 2.1 — enxerga atributos de instância como `Column[...]` em vez do valor
-# real. Os códigos abaixo são suprimidos só no serviço da biblioteca, que
-# manipula instâncias ORM; o restante do código segue checado de verdade.
+# real. Os códigos abaixo são suprimidos só no serviço da biblioteca e no
+# espelho de tarefas de download (T04), que manipulam instâncias ORM; o
+# restante do código segue checado de verdade.
 [[tool.mypy.overrides]]
-module = ["ytmusic_tui.library.service"]
+module = ["ytmusic_tui.library.service", "ytmusic_tui.download.store"]
 disable_error_code = ["assignment", "return-value", "arg-type"]
 
 [tool.pytest.ini_options]
