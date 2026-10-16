@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -1740,6 +1741,150 @@ async def test_navegacao_completa_sem_mouse(monkeypatch):
         await pilot.press("ctrl+q")
         await pilot.pause()
     assert app.return_code == 0
+
+
+@pytest.mark.asyncio
+async def test_busca_antiga_nao_pisa_na_mais_recente(monkeypatch):
+    """T12-R2: A (lenta) conclui depois de B (rápida) — a tela segue com B.
+
+    A conclusão fora de ordem é forçada com fakes controlados por evento:
+    A fica presa no ``to_thread`` enquanto B completa e pinta; quando A
+    destrava, a época antiga faz o resultado ser descartado.
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        release = threading.Event()
+
+        def _search(query, songs_limit=25, albums_limit=15, should_abort=None):
+            if query == "lenta":
+                release.wait(timeout=5)
+                return SearchResult(tracks=(_song("velha", "Resposta antiga"),))
+            return SearchResult(tracks=(_song("nova", "Resposta nova"),))
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _search)
+
+        task_a = asyncio.create_task(screen.perform_search("lenta"))
+        await pilot.pause(0.02)  # A já está presa no to_thread
+        await screen.perform_search("rápida")
+        await pilot.pause()
+
+        songs = screen.query_one("#search-songs", SongListView)
+        assert [s.video_id for s in songs.songs] == ["nova"]
+
+        release.set()
+        await asyncio.wait_for(task_a, timeout=5)
+        await pilot.pause()
+
+        assert [s.video_id for s in songs.songs] == ["nova"]
+        assert screen._search_epoch == 2
+
+
+@pytest.mark.asyncio
+async def test_erro_de_busca_antiga_nao_apaga_resultado_novo(monkeypatch):
+    """T12-R2: a falha de uma busca abandonada não pinta a tela."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        release = threading.Event()
+
+        def _search(query, songs_limit=25, albums_limit=15, should_abort=None):
+            if query == "lenta":
+                release.wait(timeout=5)
+                raise RuntimeError("rede caiu")
+            return SearchResult(tracks=(_song("nova", "Resposta nova"),))
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _search)
+
+        task_a = asyncio.create_task(screen.perform_search("lenta"))
+        await pilot.pause(0.02)
+        await screen.perform_search("rápida")
+        await pilot.pause()
+
+        release.set()
+        await asyncio.wait_for(task_a, timeout=5)
+        await pilot.pause()
+
+        songs = screen.query_one("#search-songs", SongListView)
+        message = screen.query_one("#search-message", Static)
+        assert [s.video_id for s in songs.songs] == ["nova"]
+        assert message.display is False
+        assert "Erro na busca" not in str(message.render())
+
+
+@pytest.mark.asyncio
+async def test_album_antigo_nao_pisa_no_mais_recente(monkeypatch):
+    """T12-R2: a carga antiga de álbum concluindo depois não sobrepõe a nova."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        release = threading.Event()
+
+        def _get_album(browse_id):
+            if browse_id == "MPREb-lento":
+                release.wait(timeout=5)
+                return _album_details("MPREb-lento")
+            return _album_details("MPREb-rapido")
+
+        monkeypatch.setattr(ytmusic, "get_album", _get_album)
+
+        captured: list = []
+        monkeypatch.setattr(screen, "run_worker", lambda worker, **kwargs: captured.append(worker))
+
+        screen.open_album("MPREb-lento")  # época 1
+        screen.open_album("MPREb-rapido")  # época 2
+        task_a = asyncio.create_task(captured[0])
+        await captured[1]  # a carga nova completa primeiro
+        await pilot.pause()
+        current = screen._current_album
+        assert current is not None and current.browse_id == "MPREb-rapido"
+
+        release.set()
+        await asyncio.wait_for(task_a, timeout=5)
+        await pilot.pause()
+
+        current = screen._current_album
+        assert current is not None and current.browse_id == "MPREb-rapido"
+        assert screen._album_epoch == 2
+
+
+@pytest.mark.asyncio
+async def test_erro_de_carga_antiga_de_album_nao_apaga_o_novo(monkeypatch):
+    """T12-R2: o erro de uma carga abandonada de álbum também é descartado."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        release = threading.Event()
+
+        def _get_album(browse_id):
+            if browse_id == "MPREb-lento":
+                release.wait(timeout=5)
+                raise RuntimeError("resposta inválida da API")
+            return _album_details("MPREb-rapido")
+
+        monkeypatch.setattr(ytmusic, "get_album", _get_album)
+
+        captured: list = []
+        monkeypatch.setattr(screen, "run_worker", lambda worker, **kwargs: captured.append(worker))
+
+        screen.open_album("MPREb-lento")
+        screen.open_album("MPREb-rapido")
+        task_a = asyncio.create_task(captured[0])
+        await captured[1]
+        await pilot.pause()
+
+        release.set()
+        await asyncio.wait_for(task_a, timeout=5)
+        await pilot.pause()
+
+        message = screen.query_one("#album-message", Static)
+        assert "Erro ao carregar álbum" not in str(message.render())
+        current = screen._current_album
+        assert current is not None and current.browse_id == "MPREb-rapido"
 
 
 if __name__ == "__main__":

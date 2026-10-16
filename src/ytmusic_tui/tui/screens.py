@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 import threading
 from pathlib import Path
 from typing import cast
@@ -45,6 +46,8 @@ from ytmusic_tui.tui.widgets import (
 )
 from ytmusic_tui.versions import render_dependencies
 
+logger = logging.getLogger(__name__)
+
 
 class MainScreen(PlaybackController, DownloadController, LibraryController, Screen):
     """Tela principal com abas.
@@ -80,6 +83,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._current_album: AlbumDetail | None = None
         # Nova busca marca o abort de retry da anterior (T10-R3, A1); None = sem busca.
         self._search_abort: threading.Event | None = None
+        # Épocas de render (T12-R2): só a operação mais recente pinta a tela.
+        self._search_epoch: int = 0
+        self._album_epoch: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -279,21 +285,37 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._render_album_message("Carregando álbum...")
         self._set_album_tab_visible(True, album_item.title if album_item else None)
         self._switch_tab("tab-album")
-        # exclusive=True: abrir outro álbum cancela a carga anterior.
-        self.run_worker(self._load_album(browse_id), group="album", exclusive=True)
+        # Época da carga (T12-R2): uma conclusão atrasada de outra carga não
+        # sobrepõe a mais recente. exclusive=True: abrir outro álbum cancela
+        # a carga anterior; a época cobre a corrida "terminou logo depois".
+        self._album_epoch += 1
+        self.run_worker(
+            self._load_album(browse_id, self._album_epoch), group="album", exclusive=True
+        )
 
-    async def _load_album(self, browse_id: str) -> None:
+    async def _load_album(self, browse_id: str, epoch: int) -> None:
         """Carrega os detalhes do álbum fora da thread da UI."""
         try:
             details = await asyncio.to_thread(ytmusic.get_album, browse_id)
         except Exception as e:
             # escape(): mensagens de erro podem conter [colchetes].
-            self._render_album_message(f"Erro ao carregar álbum: {escape(str(e))}")
+            if epoch == self._album_epoch:
+                self._render_album_message(f"Erro ao carregar álbum: {escape(str(e))}")
             return
-        self.display_album(details)
+        self.display_album(details, epoch=epoch)
 
-    def display_album(self, album: AlbumDetail) -> None:
-        """Preenche a aba de álbum com cabeçalho e lista de faixas."""
+    def display_album(self, album: AlbumDetail, epoch: int | None = None) -> None:
+        """Preenche a aba de álbum com cabeçalho e lista de faixas.
+
+        ``epoch`` (T12-R2): quando informada e não for mais a época corrente,
+        o resultado é descartado sem pintar — a resposta de uma carga antiga
+        não pisa na mais recente. ``None`` (chamada direta/síncrona) pinta.
+        """
+        if epoch is not None and epoch != self._album_epoch:
+            logger.debug(
+                "Carga de álbum obsoleta descartada (época %s ≠ %s)", epoch, self._album_epoch
+            )
+            return
         self._current_album = album
         tracks = [track for track in album.tracks if track.video_id and track.is_available]
         self._render_album_header(album)
@@ -467,8 +489,15 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         if not query.strip():
             return
 
+        # Toda busca aceita vira a época corrente (T12-R2) — inclusive a que
+        # falhar na inicialização: resposta/conclusão de uma busca antiga não
+        # pode reaparecer por cima da mais recente.
+        self._search_epoch += 1
+        epoch = self._search_epoch
+
         if not ytmusic.initialize():
-            self._render_search_message("Não foi possível inicializar a busca.")
+            if epoch == self._search_epoch:
+                self._render_search_message("Não foi possível inicializar a busca.")
             return
 
         # Nova busca abandona a anterior (T10-R3, A1): o evento faz o retry
@@ -487,8 +516,11 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             results = await asyncio.to_thread(
                 ytmusic.search_catalog, query, should_abort=abort.is_set
             )
-            self.display_search_results(results)
+            self.display_search_results(results, epoch=epoch)
         except Exception as e:
+            if epoch != self._search_epoch:
+                logger.debug("Erro de busca obsoleto descartado (época %s)", epoch)
+                return
             # escape(): mensagens de erro podem conter [colchetes].
             self._render_search_message(f"Erro na busca: {escape(str(e))}")
 
@@ -509,11 +541,20 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         message.display = True
         message.update(text)
 
-    def display_search_results(self, results: SearchResult | list[Track]) -> None:
+    def display_search_results(
+        self, results: SearchResult | list[Track], epoch: int | None = None
+    ) -> None:
         """Exibe resultados da busca: músicas e álbuns (in-place).
 
         Aceita uma lista de músicas (atalho de teste) ou um ``SearchResult``.
+        ``epoch`` (T12-R2): quando informada e não for mais a época corrente,
+        o resultado é descartado sem pintar a tela; ``None`` pinta sempre.
         """
+        if epoch is not None and epoch != self._search_epoch:
+            logger.debug(
+                "Resultado de busca obsoleto descartado (época %s ≠ %s)", epoch, self._search_epoch
+            )
+            return
         if isinstance(results, list):
             tracks, albums = list(results), []
         else:
