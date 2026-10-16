@@ -178,7 +178,8 @@ class YTMusicAPI:
         key = cache_key(query, songs_limit, albums_limit)
         cached = cache.get("search", key)
         if cached is not None:
-            logger.debug('cache hit na busca "%s"', query)
+            # §13.2/T13: registra o fato, nunca a consulta do usuário.
+            logger.debug("cache hit na busca")
             return SearchResult.from_payload(cached)
 
         # Resolver o cliente antes de paralelizar: o visitor id anônimo é

@@ -4,6 +4,9 @@ Checklist coberta aqui:
 
 - ``mask_home``/``mask_urls`` (funções puras): HOME vira ``~``; URL perde
   query, fragment e credenciais; texto comum passa intacto;
+- ``mask_secrets`` (§13.2/T13): cabeçalhos ``Authorization``/``Cookie``/
+  ``Set-Cookie`` perdem o valor, mantendo o nome (aplicado no formatter do
+  log — prova de ponta a ponta em ``tests/test_log.py``);
 - ``_set_failed`` é o ponto ÚNICO em que ``task.error`` recebe texto de
   terceiro — a tabela de downloads e o toast de falha leem daí, então já
   nascem mascarados (teste de ponta a ponta na TUI em ``test_tui.py``);
@@ -16,7 +19,7 @@ Checklist coberta aqui:
 import sys
 from pathlib import Path
 
-from ytmusic_tui.diagnostics import mask_diagnostics, mask_home, mask_urls
+from ytmusic_tui.diagnostics import mask_diagnostics, mask_home, mask_secrets, mask_urls
 from ytmusic_tui.download import DownloadManager, DownloadStatus, DownloadTask
 from ytmusic_tui.library.errors import DatabaseInaccessibleError, describe_library_error
 from ytmusic_tui.player import MPVPlayer
@@ -62,6 +65,27 @@ def test_mask_diagnostics_combines_both():
     assert HOME not in masked
     assert "SEGREDO123" not in masked
     assert "~/dl.mp3" in masked
+
+
+def test_mask_secrets_redige_cabecalhos_de_credencial():
+    """Authorization/Cookie/Set-Cookie perdem o valor; o nome do header fica."""
+    text = (
+        "Authorization: Bearer abc123\n"
+        "cookie: sess=xyz; csrf=1\n"
+        "Set-Cookie: id=a3f; Path=/\n"
+        "sem header sensível aqui"
+    )
+    masked = mask_secrets(text)
+
+    assert "abc123" not in masked
+    assert "sess=xyz" not in masked
+    assert "id=a3f" not in masked
+    assert masked.splitlines()[:3] == [
+        "Authorization: [REDACTED]",
+        "cookie: [REDACTED]",
+        "Set-Cookie: [REDACTED]",
+    ]
+    assert masked.splitlines()[3] == "sem header sensível aqui"
 
 
 def test_set_failed_masks_download_errors():
