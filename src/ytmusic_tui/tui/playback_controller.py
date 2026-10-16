@@ -10,6 +10,7 @@ from ytmusic_tui.config import settings
 from ytmusic_tui.library.errors import AudioFileMissingError, describe_library_error
 from ytmusic_tui.library.models import Track as LibraryTrack
 from ytmusic_tui.player import TrackInfo, player
+from ytmusic_tui.tui.messages import TRACK_WITHOUT_VIDEO_ID, play_started, playback_error
 from ytmusic_tui.tui.widgets import SongListView, TrackListView
 
 
@@ -95,7 +96,7 @@ class PlaybackController:
         """Reproduz uma música vinda da API (resultado de busca ou álbum)."""
         info = self._track_info_from_song(song)
         if not info.video_id:
-            self._toast("Faixa sem videoId; não é possível reproduzir")
+            self._toast(TRACK_WITHOUT_VIDEO_ID)
             return
 
         view = self.query_one(f"#{view_id}", SongListView)
@@ -114,7 +115,7 @@ class PlaybackController:
         try:
             ensure_audio_file(track)
         except AudioFileMissingError as error:
-            self._toast(f"⚠️ {describe_library_error(error)}")
+            self._toast(playback_error(describe_library_error(error)))
             return
         view = self.query_one("#library-list", TrackListView)
         index = view.index if view.index is not None else 0
@@ -125,7 +126,7 @@ class PlaybackController:
     def _start_playback(self, info: TrackInfo) -> None:
         """Inicia a reprodução de uma faixa."""
         if player.play(info):
-            self._toast(f"▶ {info.title}")
+            self._toast(play_started(info.title))
 
     def _play_relative(self, delta: int) -> bool:
         """Toca a faixa na posição atual + delta (fila da última lista usada)."""

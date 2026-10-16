@@ -36,6 +36,25 @@ from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.dialogs import HelpScreen
 from ytmusic_tui.tui.download_controller import DownloadController
 from ytmusic_tui.tui.library_controller import LIBRARY_EMPTY_TEXT, LibraryController
+from ytmusic_tui.tui.messages import (
+    ALBUM_EMPTY,
+    ALBUM_LOADING,
+    ALBUM_WITHOUT_ID,
+    INVALID_VALUE,
+    SEARCH_INIT_DETAIL,
+    SEARCH_INIT_NEXT,
+    SEARCH_NO_RESULTS,
+    SEARCH_STARTING,
+    album_error,
+    audio_quality_set,
+    concurrent_set,
+    download_dir_error,
+    download_dir_set,
+    download_format_set,
+    download_quality_set,
+    search_error,
+    volume_set,
+)
 from ytmusic_tui.tui.playback_controller import PlaybackController
 from ytmusic_tui.tui.widgets import (
     AlbumListView,
@@ -277,12 +296,12 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
     def open_album(self, browse_id: str, album_item: Album | None = None) -> None:
         """Abre o álbum na aba dedicada e carrega as faixas em background."""
         if not browse_id:
-            self._toast("Álbum sem identificador; não é possível abrir")
+            self._toast(ALBUM_WITHOUT_ID)
             return
         if album_item:
             # Cabeçalho imediato com os dados da busca; o get_album completa.
             self._render_album_header(album_item)
-        self._render_album_message("Carregando álbum...")
+        self._render_album_message(ALBUM_LOADING)
         self._set_album_tab_visible(True, album_item.title if album_item else None)
         self._switch_tab("tab-album")
         # Época da carga (T12-R2): uma conclusão atrasada de outra carga não
@@ -298,9 +317,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         try:
             details = await asyncio.to_thread(ytmusic.get_album, browse_id)
         except Exception as e:
-            # escape(): mensagens de erro podem conter [colchetes].
+            # T12-R5: erro em 3 partes; escape(): o detalhe pode ter [colchetes].
             if epoch == self._album_epoch:
-                self._render_album_message(f"Erro ao carregar álbum: {escape(str(e))}")
+                self._render_album_message(escape(album_error(str(e))))
             return
         self.display_album(details, epoch=epoch)
 
@@ -328,7 +347,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         view.set_songs(tracks)
         view.display = bool(tracks)
         button.display = bool(tracks)
-        self._render_album_message("" if tracks else "Álbum sem faixas disponíveis.")
+        self._render_album_message("" if tracks else ALBUM_EMPTY)
         if tracks:
             # Foco na lista: Enter toca, "a" baixa o álbum, setas navegam.
             self.call_after_refresh(view.focus)
@@ -423,10 +442,10 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         if event.select.id == "setting-audio-quality" and event.value:
             settings.update_and_save(mpv_audio_quality=str(event.value))
             player.apply_audio_quality()
-            self._toast(f"Qualidade de áudio: {event.value} (aplica na próxima faixa)")
+            self._toast(audio_quality_set(str(event.value)))
         elif event.select.id == "setting-format" and event.value:
             settings.update_and_save(download_format=str(event.value))
-            self._toast(f"Formato de download: {event.value}")
+            self._toast(download_format_set(str(event.value)))
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Aplica checkboxes da aba Config."""
@@ -449,27 +468,27 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
                 settings.update_and_save(mpv_volume=volume)
                 player.set_volume(volume)
                 self.query_one(NowPlayingBar).update_volume(volume)
-                self._toast(f"Volume: {volume}%")
+                self._toast(volume_set(volume))
             elif input_id == "setting-download-dir":
                 path = Path(value).expanduser()
                 path.mkdir(parents=True, exist_ok=True)
                 settings.update_and_save(download_dir=path)
-                self._toast(f"Diretório de downloads: {path}")
+                self._toast(download_dir_set(path))
             elif input_id == "setting-download-quality":
                 settings.update_and_save(download_quality=value or "320")
-                self._toast(f"Qualidade do download: {value or '320'}")
+                self._toast(download_quality_set(value))
             elif input_id == "setting-concurrent":
                 # A UI normaliza antes da API (T06-R4): o valor salvo e
                 # aplicado está sempre na faixa aceita pelo gerenciador.
                 concurrent = max(MIN_DOWNLOAD_CONCURRENT, min(MAX_DOWNLOAD_CONCURRENT, int(value)))
                 settings.update_and_save(download_concurrent=concurrent)
                 download_manager.set_concurrent(concurrent)
-                self._toast(f"Downloads simultâneos: {concurrent}")
+                self._toast(concurrent_set(concurrent))
         except (TypeError, ValueError):
-            self._toast("Valor inválido")
+            self._toast(INVALID_VALUE)
         except OSError as exc:
             # §8.3/T06: erro do sistema traz caminho absoluto — exibe mascarado.
-            self._toast(f"Não foi possível usar o diretório: {mask_diagnostics(str(exc))}")
+            self._toast(download_dir_error(mask_diagnostics(str(exc))))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Reproduz o item selecionado (ou abre o álbum) em uma lista."""
@@ -502,7 +521,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
 
         if not ytmusic.initialize():
             if epoch == self._search_epoch:
-                self._render_search_message("Não foi possível inicializar a busca.")
+                self._render_search_message(
+                    search_error(SEARCH_INIT_DETAIL, next_action=SEARCH_INIT_NEXT)
+                )
             return
 
         # Nova busca abandona a anterior (T10-R3, A1): o evento faz o retry
@@ -512,7 +533,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._search_abort = threading.Event()
         abort = self._search_abort
 
-        self._render_search_message("Buscando...")
+        self._render_search_message(SEARCH_STARTING)
 
         try:
             # search_catalog: músicas + álbuns em 2 requisições paralelas
@@ -526,8 +547,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             if epoch != self._search_epoch:
                 logger.debug("Erro de busca obsoleto descartado (época %s)", epoch)
                 return
-            # escape(): mensagens de erro podem conter [colchetes].
-            self._render_search_message(f"Erro na busca: {escape(str(e))}")
+            # T12-R5: erro em 3 partes; escape(): o detalhe pode ter [colchetes].
+            self._render_search_message(escape(search_error(str(e))))
 
     def _render_search_message(self, text: str) -> None:
         """Mostra uma mensagem no lugar dos resultados (in-place)."""
@@ -568,7 +589,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         tracks = [song for song in tracks if song.video_id]
         albums = [album for album in albums if album.browse_id]
         if not tracks and not albums:
-            self._render_search_message("Nenhum resultado encontrado.")
+            self._render_search_message(SEARCH_NO_RESULTS)
             return
 
         try:

@@ -13,20 +13,23 @@ from ytmusic_tui.library.errors import LibraryError, describe_library_error
 from ytmusic_tui.library.recovery import reconcile
 from ytmusic_tui.log import log_file_path
 from ytmusic_tui.player import player
+from ytmusic_tui.tui.messages import (
+    LIBRARY_EMPTY_TEXT,
+    LIBRARY_LIKE_NEEDS_DOWNLOAD,
+    LIBRARY_LOADING_TEXT,
+    LIBRARY_UNAVAILABLE_TOAST,
+    LIKE_ADDED,
+    LIKE_REMOVED,
+    NO_TRACK_PLAYING,
+    library_unavailable,
+    reconciliation_summary,
+)
 from ytmusic_tui.tui.widgets import TrackListView
 
 logger = logging.getLogger(__name__)
 
-# Texto padrão da aba Biblioteca quando não há faixas carregadas (usado
-# também para restaurá-lo depois de uma falha de carregamento).
-LIBRARY_EMPTY_TEXT = (
-    "Nenhuma faixa na biblioteca local ainda.\nBaixe músicas com Ctrl+D durante a reprodução."
-)
-
-# Estado "carregando" (§12.2): visível enquanto a leitura do banco roda —
-# só entra na tela quando não há conteúdo a preservar (primeira carga,
-# depois de erro/vazio); refresh de fundo não apaga a lista visível.
-LIBRARY_LOADING_TEXT = "Carregando biblioteca local..."
+# Textos da aba Biblioteca (T12-R7: definidos em ``tui/messages.py`` e
+# re-exportados aqui — a tela e os testes continuam importando daqui).
 
 
 class LibraryController:
@@ -121,13 +124,9 @@ class LibraryController:
         """Mostra o motivo exato da falha (nunca uma lista "vazia") + o log."""
         view.set_tracks([])
         view.display = False
-        message.update(
-            "[b]⚠️ Não foi possível carregar a biblioteca local[/b]\n"
-            f"{escape(reason)}\n"
-            f"Nada foi apagado. Detalhes no log: {escape(str(log_file_path()))}"
-        )
+        message.update(library_unavailable(escape(reason), escape(str(log_file_path()))))
         message.display = True
-        self._toast("⚠️ Falha ao carregar a biblioteca local — detalhes no log")
+        self._toast(LIBRARY_UNAVAILABLE_TOAST)
 
     # ===== Reconciliação de arquivos (§5.3/T03) =====
 
@@ -149,19 +148,19 @@ class LibraryController:
             logger.exception("Falha na reconciliação de arquivos")
             return
         if report.has_findings:
-            self._toast(f"🧹 Reconciliação: {report.summary()}")
+            self._toast(reconciliation_summary(report.summary()))
             self.refresh_library()
 
     def action_like(self) -> None:
         """Curte/descurte a faixa atual (apenas na biblioteca local, sem conta)."""
         track = player.current_track
         if not track or not track.video_id:
-            self._toast("Nenhuma faixa em reprodução")
+            self._toast(NO_TRACK_PLAYING)
             return
 
         lib_track = library.get_track_by_source_id(track.video_id)
         if not lib_track:
-            self._toast("Baixe a faixa primeiro (Ctrl+D) para curtí-la na biblioteca local")
+            self._toast(LIBRARY_LIKE_NEEDS_DOWNLOAD)
             return
         liked = library.toggle_like(cast(int, lib_track.id))
-        self._toast("❤️ Curtida (local)" if liked else "Removida das curtidas (local)")
+        self._toast(LIKE_ADDED if liked else LIKE_REMOVED)

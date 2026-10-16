@@ -10,7 +10,29 @@ from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.dialogs import ConfirmScreen
-from ytmusic_tui.tui.messages import CONFIRM_DISCARD_CANCELLED, confirm_discard_message
+from ytmusic_tui.tui.messages import (
+    ALBUM_NO_TRACKS,
+    ALBUM_REQUIRED,
+    CONFIRM_DISCARD_CANCELLED,
+    DISCARD_FAILED,
+    DISCARD_REQUIRES_INTERRUPTED,
+    NO_TRACK_PLAYING,
+    RETRY_FAILED,
+    RETRY_REQUIRES_INTERRUPTED,
+    album_already_running,
+    album_queue_summary,
+    album_queued,
+    album_skipped,
+    already_queued,
+    confirm_discard_message,
+    discarded_download,
+    download_cancelled,
+    download_completed,
+    download_failed,
+    download_starting,
+    interrupted_downloads,
+    retrying_download,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -115,7 +137,7 @@ class DownloadController:
     def action_download_album(self) -> None:
         """Baixa todas as faixas do álbum aberto na aba 💿 Álbum (tecla "a")."""
         if not self._current_album:
-            self._toast("Nenhum álbum aberto — selecione um álbum na busca")
+            self._toast(ALBUM_REQUIRED)
             return
         self.download_album(self._current_album)
 
@@ -128,15 +150,15 @@ class DownloadController:
         """
         task = self._selected_download_task()
         if task is None or task.status is not DownloadStatus.INTERRUPTED:
-            self._toast("Selecione um download interrompido (⏸️) na aba downloads para retomar")
+            self._toast(RETRY_REQUIRES_INTERRUPTED)
             return
         new_task = download_manager.retry_interrupted(task.id)
         if new_task is None:
-            self._toast("Não foi possível retomar o download")
+            self._toast(RETRY_FAILED)
             return
         self.update_downloads_table()
         self.run_worker(self._run_download(new_task), group="download")
-        self._toast(f"🔁 Retomando: {task.title}")
+        self._toast(retrying_download(task.title))
 
     def action_discard_download(self) -> None:
         """Descarta a tarefa INTERRUPTED selecionada (tecla "d", T04-R2).
@@ -148,7 +170,7 @@ class DownloadController:
         """
         task = self._selected_download_task()
         if task is None or task.status is not DownloadStatus.INTERRUPTED:
-            self._toast("Selecione um download interrompido (⏸️) na aba downloads para descartar")
+            self._toast(DISCARD_REQUIRES_INTERRUPTED)
             return
         self.app.push_screen(
             ConfirmScreen(confirm_discard_message(task.title)),
@@ -162,11 +184,10 @@ class DownloadController:
             return
         discarded = download_manager.discard_interrupted(task.id)
         if discarded is None:
-            self._toast("Não foi possível descartar o download")
+            self._toast(DISCARD_FAILED)
             return
         self.update_downloads_table()
-        detail = f" — {len(discarded)} temporário(s) removido(s)" if discarded else ""
-        self._toast(f"🗑️ Download descartado: {task.title}{detail}")
+        self._toast(discarded_download(task.title, len(discarded)))
 
     def announce_interrupted(self) -> None:
         """Avisa sobre downloads interrompidos recuperados (T04-R2).
@@ -178,16 +199,13 @@ class DownloadController:
             1 for task in download_manager.get_queue() if task.status is DownloadStatus.INTERRUPTED
         )
         if interrupted:
-            self._toast(
-                f"⏸️ {interrupted} download(s) interrompido(s) — aba 📥: "
-                "selecione e use r (retomar) ou d (descartar)"
-            )
+            self._toast(interrupted_downloads(interrupted))
 
     def download_current_track(self) -> None:
         """Baixa a faixa em reprodução."""
         track = player.current_track
         if not track or not track.video_id:
-            self._toast("Nenhuma faixa em reprodução")
+            self._toast(NO_TRACK_PLAYING)
             return
         self._enqueue_download(track)
 
@@ -203,7 +221,7 @@ class DownloadController:
         """
         tracks = [track for track in album.tracks if track.video_id and track.is_available]
         if not tracks:
-            self._toast("Álbum sem faixas para baixar")
+            self._toast(ALBUM_NO_TRACKS)
             return
 
         album_title = album.title
@@ -227,12 +245,12 @@ class DownloadController:
 
         parts = []
         if queued:
-            parts.append(f"{queued} faixa(s) enfileirada(s)")
+            parts.append(album_queued(queued))
         if in_progress:
-            parts.append(f"{in_progress} já em andamento")
+            parts.append(album_already_running(in_progress))
         if skipped:
-            parts.append(f"{skipped} já baixada(s)")
-        self._toast(f"💿 {album_title}: {', '.join(parts) if parts else 'nada novo para baixar'}")
+            parts.append(album_skipped(skipped))
+        self._toast(album_queue_summary(album_title, parts))
 
     def _enqueue_download(self, track: TrackInfo, notify: bool = True) -> bool:
         """Registra a faixa na biblioteca e enfileira o download.
@@ -253,7 +271,7 @@ class DownloadController:
             album=track.album or "",
         ):
             if notify:
-                self._toast(f"⏳ Já na fila: {track.title}")
+                self._toast(already_queued(track.title))
             return False
 
         track_id = library.ensure_track(
@@ -277,7 +295,7 @@ class DownloadController:
         # sem exclusive=True para não cancelar o worker de outro download.
         self.run_worker(self._run_download(task), group="download")
         if notify:
-            self._toast(f"Iniciando download: {track.title}")
+            self._toast(download_starting(track.title))
         return True
 
     async def _run_download(self, task: DownloadTask) -> None:
@@ -285,11 +303,11 @@ class DownloadController:
         await download_manager.download(task)
         self.update_downloads_table()
         if task.status == DownloadStatus.COMPLETED:
-            self._toast(f"✅ Download concluído: {task.title}")
+            self._toast(download_completed(task.title))
             self.refresh_library()
         elif task.status == DownloadStatus.FAILED:
-            self._toast(f"❌ Falha no download: {task.error}")
+            self._toast(download_failed(task.error or "sem detalhe"))
         elif task.status == DownloadStatus.CANCELLED:
-            self._toast(f"Download cancelado: {task.title}")
+            self._toast(download_cancelled(task.title))
         # INTERRUPTED não gera toast: só acontece no encerramento do app,
         # com a TUI já saindo — e a janela some antes de o toast aparecer.

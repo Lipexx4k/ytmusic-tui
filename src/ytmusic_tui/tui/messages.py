@@ -9,6 +9,8 @@ from collections.abc import Iterable
 
 from textual.binding import Binding, BindingType
 
+from ytmusic_tui.diagnostics import mask_diagnostics
+
 # ===== Ajuda (T12-R1) =====
 
 HELP_TITLE = "❓ Ajuda — YouTube Music TUI"
@@ -100,3 +102,206 @@ def confirm_discard_message(title: str) -> str:
         "publicado (se existir) e a biblioteca não são tocados.\n\n"
         f"{CONFIRM_DISCARD_HINT}"
     )
+
+
+# ===== Erros em 3 partes (T12-R5) =====
+
+#: Marcadores estáveis das partes 2 e 3 (a parte 1 abre a mensagem).
+ERROR_PRESERVED_MARK = "🛡️"
+ERROR_NEXT_MARK = "▶"
+
+#: Parte 2 padrão de quem falha sem tocar em dado local (busca/álbum).
+NOTHING_LOST = "Nada foi baixado nem apagado."
+
+
+def format_error(what: str, *, preserved: str = NOTHING_LOST, next_action: str) -> str:
+    """Erro em 3 partes para a UI (T12-R5).
+
+    (1) **O que falhou** (``what``, já com o contexto — ex.: "Erro na busca");
+    (2) o que foi **preservado** (o que o usuário não perdeu);
+    (3) a **próxima ação** sugerida.
+
+    O detalhe passa por ``mask_diagnostics`` (§8.3: caminho do HOME e URLs
+    com credenciais), nunca carrega traceback e o retorno é **texto puro**:
+    telas com markup escapam antes de exibir; o toast (``markup=False``) usa
+    como está.
+    """
+    detail = mask_diagnostics(" ".join(what.split()))
+    return f"{detail}\n{ERROR_PRESERVED_MARK} {preserved}\n{ERROR_NEXT_MARK} {next_action}"
+
+
+def search_error(
+    detail: str, *, next_action: str = "Tente de novo em instantes ou mude o termo buscado."
+) -> str:
+    """Falha da busca em 3 partes (T12-R5)."""
+    return format_error(f"{SEARCH_ERROR_TITLE}: {detail}", next_action=next_action)
+
+
+def album_error(detail: str) -> str:
+    """Falha ao carregar o álbum em 3 partes (T12-R5)."""
+    return format_error(
+        f"{ALBUM_ERROR_TITLE}: {detail}",
+        next_action="Escolha outro álbum ou abra este de novo.",
+    )
+
+
+def player_error(message: str) -> str:
+    """Falha do player em 3 partes (T12-R5)."""
+    return format_error(
+        f"Erro no player: {message}",
+        preserved="A biblioteca e os downloads não foram afetados.",
+        next_action="Escolha outra faixa ou tente de novo.",
+    )
+
+
+def download_failed(error: str) -> str:
+    """Falha de download em 3 partes (T12-R5; unifica o aviso do T11)."""
+    return format_error(
+        f"❌ Falha no download: {error}",
+        preserved="Nada foi publicado na biblioteca (temporários da tarefa foram limpos).",
+        next_action="Veja o detalhe no log ou tente baixar de novo (Ctrl+D).",
+    )
+
+
+# ===== Toasts e mensagens de estado (T12-R7 · ponto único pt-BR) =====
+
+# --- Reprodução ---
+NO_TRACK_PLAYING = "Nenhuma faixa em reprodução"
+TRACK_WITHOUT_VIDEO_ID = "Faixa sem videoId; não é possível reproduzir"
+
+
+def play_started(title: str) -> str:
+    return f"▶ {title}"
+
+
+def playback_error(detail: str) -> str:
+    return f"⚠️ {detail}"
+
+
+# --- Busca e aba 💿 Álbum ---
+SEARCH_STARTING = "Buscando..."
+SEARCH_NO_RESULTS = "Nenhum resultado encontrado."
+SEARCH_ERROR_TITLE = "Erro na busca"
+SEARCH_INIT_DETAIL = "não foi possível inicializar a conexão com o YouTube Music"
+SEARCH_INIT_NEXT = "Verifique a rede e tente de novo."
+ALBUM_LOADING = "Carregando álbum..."
+ALBUM_EMPTY = "Álbum sem faixas disponíveis."
+ALBUM_ERROR_TITLE = "Erro ao carregar álbum"
+ALBUM_WITHOUT_ID = "Álbum sem identificador; não é possível abrir"
+ALBUM_REQUIRED = "Nenhum álbum aberto — selecione um álbum na busca"
+
+# --- Downloads ---
+RETRY_REQUIRES_INTERRUPTED = "Selecione um download interrompido (⏸️) na aba downloads para retomar"
+DISCARD_REQUIRES_INTERRUPTED = (
+    "Selecione um download interrompido (⏸️) na aba downloads para descartar"
+)
+RETRY_FAILED = "Não foi possível retomar o download"
+DISCARD_FAILED = "Não foi possível descartar o download"
+ALBUM_NO_TRACKS = "Álbum sem faixas para baixar"
+ALBUM_NOTHING_NEW = "nada novo para baixar"
+
+
+def retrying_download(title: str) -> str:
+    return f"🔁 Retomando: {title}"
+
+
+def discarded_download(title: str, removed: int) -> str:
+    detail = f" — {removed} temporário(s) removido(s)" if removed else ""
+    return f"🗑️ Download descartado: {title}{detail}"
+
+
+def interrupted_downloads(count: int) -> str:
+    return (
+        f"⏸️ {count} download(s) interrompido(s) — aba 📥: "
+        "selecione e use r (retomar) ou d (descartar)"
+    )
+
+
+def album_queue_summary(album: str, parts: list[str]) -> str:
+    return f"💿 {album}: {', '.join(parts) if parts else ALBUM_NOTHING_NEW}"
+
+
+def album_queued(count: int) -> str:
+    return f"{count} faixa(s) enfileirada(s)"
+
+
+def album_already_running(count: int) -> str:
+    return f"{count} já em andamento"
+
+
+def album_skipped(count: int) -> str:
+    return f"{count} já baixada(s)"
+
+
+def already_queued(title: str) -> str:
+    return f"⏳ Já na fila: {title}"
+
+
+def download_starting(title: str) -> str:
+    return f"Iniciando download: {title}"
+
+
+def download_completed(title: str) -> str:
+    return f"✅ Download concluído: {title}"
+
+
+def download_cancelled(title: str) -> str:
+    return f"Download cancelado: {title}"
+
+
+# --- Biblioteca local ---
+LIBRARY_EMPTY_TEXT = (
+    "Nenhuma faixa na biblioteca local ainda.\nBaixe músicas com Ctrl+D durante a reprodução."
+)
+LIBRARY_LOADING_TEXT = "Carregando biblioteca local..."
+LIBRARY_UNAVAILABLE_TOAST = "⚠️ Falha ao carregar a biblioteca local — detalhes no log"
+LIBRARY_LIKE_NEEDS_DOWNLOAD = "Baixe a faixa primeiro (Ctrl+D) para curtí-la na biblioteca local"
+LIKE_ADDED = "❤️ Curtida (local)"
+LIKE_REMOVED = "Removida das curtidas (local)"
+
+
+def library_unavailable(reason: str, log_path: str) -> str:
+    """Falha de leitura da biblioteca — nunca parecer "vazia" (T05-R4)."""
+    return (
+        "[b]⚠️ Não foi possível carregar a biblioteca local[/b]\n"
+        f"{reason}\n"
+        f"Nada foi apagado. Detalhes no log: {log_path}"
+    )
+
+
+def reconciliation_summary(summary: str) -> str:
+    return f"🧹 Reconciliação: {summary}"
+
+
+# --- Config ---
+
+
+def audio_quality_set(value: str) -> str:
+    return f"Qualidade de áudio: {value} (aplica na próxima faixa)"
+
+
+def download_format_set(value: str) -> str:
+    return f"Formato de download: {value}"
+
+
+def volume_set(volume: int) -> str:
+    return f"Volume: {volume}%"
+
+
+def download_dir_set(path: object) -> str:
+    return f"Diretório de downloads: {path}"
+
+
+def download_quality_set(value: str) -> str:
+    return f"Qualidade do download: {value or '320'}"
+
+
+def concurrent_set(concurrent: int) -> str:
+    return f"Downloads simultâneos: {concurrent}"
+
+
+INVALID_VALUE = "Valor inválido"
+
+
+def download_dir_error(detail: str) -> str:
+    return f"Não foi possível usar o diretório: {detail}"

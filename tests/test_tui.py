@@ -26,6 +26,7 @@ from ytmusic_tui.api import ytmusic
 from ytmusic_tui.api.models import Album, AlbumDetail, SearchResult, Track
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
+from ytmusic_tui.errors import InvalidResponseError, NetworkError, RateLimitError
 from ytmusic_tui.library import db_manager, library
 from ytmusic_tui.library.errors import (
     AudioFileMissingError,
@@ -1708,6 +1709,9 @@ async def test_mpv_indisponivel_vira_toast_sem_traceback(monkeypatch):
 
         assert toasts and toasts[0].startswith("Erro no player:")
         assert "mpv indisponível" in toasts[0]
+        # T12-R5: o toast do player também responde as 3 perguntas
+        assert "A biblioteca e os downloads não foram afetados." in toasts[0]
+        assert "Escolha outra faixa" in toasts[0]
         bar = screen.query_one("#now-playing", NowPlayingBar)
         assert "falha" in str(bar.query_one("#np-info", Static).render())
 
@@ -1945,6 +1949,122 @@ async def test_erro_de_busca_antiga_nao_apaga_resultado_novo(monkeypatch):
         assert [s.video_id for s in songs.songs] == ["nova"]
         assert message.display is False
         assert "Erro na busca" not in str(message.render())
+
+
+# ===== T12-R5: erros em 3 partes =====
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (
+            NetworkError(
+                f'busca "teste": falha de rede: conexão recusada em {Path.home()}/.cache/x '
+                "(url https://exemplo.com/x?token=segredo#frag)"
+            ),
+            "falha de rede",
+        ),
+        (
+            RateLimitError(
+                'busca "teste": limite de requisições do YouTube Music atingido — '
+                "tente de novo em instantes"
+            ),
+            "limite de requisições",
+        ),
+        (
+            InvalidResponseError(
+                'busca "teste": resposta fora do contrato do ytmusicapi '
+                "(possível mudança de formato): KeyError('contents')"
+            ),
+            "resposta fora do contrato",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_erro_de_busca_sai_em_3_partes_mascarado(monkeypatch, error, detail):
+    """T12-R5: rede, limite e resposta inválida no mesmo formato de 3 partes.
+
+    A mensagem diz (1) o que falhou, (2) o que foi preservado e (3) a próxima
+    ação; o detalhe técnico sai mascarado (§8.3) e nunca vira traceback.
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        def _search(query, songs_limit=25, albums_limit=15, should_abort=None):
+            raise error
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _search)
+
+        await screen.perform_search("teste")
+        await pilot.pause()
+
+        message = screen.query_one("#search-message", Static)
+        assert message.display is True
+        rendered = str(message.render())
+
+        assert "Erro na busca" in rendered
+        assert detail in rendered
+        assert "Nada foi baixado nem apagado." in rendered  # parte 2
+        assert "Tente de novo" in rendered  # parte 3
+        assert "Traceback" not in rendered
+        # §8.3: HOME vira ~ e a URL perde query/fragment
+        assert str(Path.home()) not in rendered
+        assert "token=segredo" not in rendered
+        assert "#frag" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_erro_de_album_sai_em_3_partes(monkeypatch):
+    """T12-R5: falha ao carregar o álbum explica o que fazer sem perder nada."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        def _get_album(browse_id):
+            raise InvalidResponseError("get_album: resposta fora do contrato do ytmusicapi")
+
+        monkeypatch.setattr(ytmusic, "get_album", _get_album)
+        captured: list = []
+        monkeypatch.setattr(screen, "run_worker", lambda worker, **kwargs: captured.append(worker))
+
+        screen.open_album("MPREb-x")
+        await captured[0]
+        await pilot.pause()
+
+        rendered = str(screen.query_one("#album-message", Static).render())
+        assert "Erro ao carregar álbum" in rendered
+        assert "Nada foi baixado nem apagado." in rendered
+        assert "Escolha outro álbum" in rendered
+
+
+@pytest.mark.asyncio
+async def test_falha_de_download_sai_em_3_partes(monkeypatch):
+    """T12-R5: falha de download unifica o aviso do T11 no formato de 3 partes."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        async def _download(task):
+            task.transition_to(DownloadStatus.RUNNING)
+            task.error = "Video unavailable"
+            task.transition_to(DownloadStatus.FAILED)
+            return task
+
+        monkeypatch.setattr(download_manager, "download", _download)
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        task = DownloadTask(video_id="abc", title="Faixa", id="task-fail")
+        await screen._run_download(task)
+
+        assert len(toasts) == 1
+        assert toasts[0].startswith("❌ Falha no download: Video unavailable")
+        assert "Nada foi publicado na biblioteca" in toasts[0]
+        assert "tente baixar de novo" in toasts[0]
 
 
 @pytest.mark.asyncio

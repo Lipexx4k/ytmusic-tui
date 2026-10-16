@@ -27,6 +27,7 @@ from ytmusic_tui.library.errors import LibraryError
 from ytmusic_tui.log import setup_logging
 from ytmusic_tui.player import PlayerEvent, PlayerState, TrackInfo, player
 from ytmusic_tui.tui.dialogs import HelpScreen
+from ytmusic_tui.tui.messages import player_error
 from ytmusic_tui.tui.screens import MainScreen
 from ytmusic_tui.tui.widgets import NowPlayingBar
 
@@ -164,7 +165,9 @@ class YTMusicTUI(App):
             )
         elif name == "error":
             np_bar.update_state(PlayerState.ERROR)
-            screen._toast(f"Erro no player: {event.data.get('message', '')}")
+            # T12-R5: falha do player em 3 partes (o detalhe já vem mascarado
+            # do ``_emit``; o formatador reaplica §8.3 de qualquer forma).
+            screen._toast(player_error(str(event.data.get("message", ""))))
 
     def _refresh_downloads_ui(self) -> None:
         """Atualiza a tabela de downloads (somente quando a aba está ativa)."""
