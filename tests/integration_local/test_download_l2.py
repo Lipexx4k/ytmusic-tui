@@ -118,7 +118,12 @@ async def test_cancel_during_slow_conversion_is_immediate_and_publishes_nothing(
 
 
 async def test_extraction_error_is_classified_and_row_removed(make_l2_env):
-    """Exceção de extração → FAILED com a mensagem do yt-dlp; linha some."""
+    """Extração falhou (bot-check) → FAILED com o rótulo e a ação; linha some.
+
+    T11-R4: o yt-dlp real embrulha a falha de extração num ``DownloadError``
+    (mensagem estável); o worker a rotula como ``ExtractionError`` — o
+    detalhe original fica preservado na mensagem mascarada.
+    """
     env = make_l2_env(mode="extract-error")
 
     task = _queue(env, "vid-erro")
@@ -128,6 +133,8 @@ async def test_extraction_error_is_classified_and_row_removed(make_l2_env):
 
     assert result.status is DownloadStatus.FAILED
     assert "Sign in to confirm" in (result.error or "")
+    assert (result.error or "").startswith("Falha de extração: ")
+    assert "nada foi baixado nem publicado" in (result.error or "")
     assert env.store.find(task.id) is None  # terminal não deixa linha
     assert not list(env.download_dir.rglob("*.mp3"))
     assert _temp_empty(env)

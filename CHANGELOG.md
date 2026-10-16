@@ -6,6 +6,33 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Adicionado
+
+- Falha de stream no player agora aparece na interface (T11): quando o mpv
+  não consegue carregar a URL ou o arquivo (indisponível, inexistente), a
+  barra de reprodução mostra "falha" e um aviso "Erro no player: …" com o
+  motivo — em vez de silêncio, sem traceback
+- Falha de extração do yt-dlp no download tem mensagem própria (T11): diz o
+  que falhou, que **nada foi baixado nem publicado** e a próxima ação
+  ("atualize o yt-dlp e tente de novo"), preservando o detalhe original —
+  antes caía no genérico "Erro inesperado"
+- Encerramento do player é auditável (T11): fechar o app encerra o `yt-dlp`
+  usado pelo hook do mpv (nenhum processo órfão ou zumbi) e eventos
+  atrasados do player não alcançam uma interface já desmontada
+
+### Alterado
+
+- A URL de watch do YouTube Music (`music.youtube.com/watch?v=…`) passa a
+  existir em um único módulo, com teste que falha se o literal reaparecer
+  em qualquer outro arquivo (T11)
+
+### Corrigido
+
+- Com áudio real, o fim de faixa não avançava para a próxima (T11): o
+  evento do mpv era comparado num formato que nunca casava (os campos
+  chegam como bytes) — o avanço automático volta a funcionar e a falha de
+  stream passa a virar erro na interface
+
 ## [0.1.3] - 2026-10-16
 
 ### Adicionado

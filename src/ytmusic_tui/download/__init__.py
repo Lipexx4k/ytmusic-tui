@@ -42,7 +42,7 @@ from ytmusic_tui.download.task import (
     DownloadTask,
     InvalidTransitionError,
 )
-from ytmusic_tui.errors import ConfigError
+from ytmusic_tui.errors import ConfigError, ExtractionError
 from ytmusic_tui.library.service import library
 
 #: URL de watch do YouTube Music — reexportada do módulo-folha ``urls``
@@ -81,6 +81,45 @@ def _load_yt_dlp() -> Any:
 
         _yt_dlp_module = yt_dlp
     return _yt_dlp_module
+
+
+#: Marcas estáveis das mensagens de falha de EXTRAÇÃO do yt-dlp (T11-R4/Q-D).
+#: O tipo ``ExtractorError`` é o sinal primário, mas o yt-dlp embrulha quase
+#: tudo num ``DownloadError`` (conferido na versão instalada) — as frases
+#: cobrem o erro embrulhado, incluindo o bot-check do YouTube.
+_EXTRACTION_MARKERS = (
+    "unable to extract",
+    "no video formats",
+    "unsupported url",
+    "sign in to confirm",
+)
+
+
+def _extraction_error(error: Exception, yt_dlp: Any) -> ExtractionError | None:
+    """Traduz falha de extração do yt-dlp para a taxonomia raiz (T11-R4/Q-D).
+
+    A extração é a PRIMEIRA etapa (resolver a URL de watch): quando ela
+    falha, nada foi baixado nem publicado (INV-1). Devolve o
+    ``ExtractionError`` com o detalhe original preservado + a próxima ação,
+    ou ``None`` quando não é extração — aí o chamador mantém o tratamento de
+    hoje (mensagem crua de ``DownloadError``; ``Erro inesperado`` no resto).
+
+    O player NÃO passa por aqui: a mensagem do mpv vai como veio —
+    classificar texto de terceiro não é confiável (decisão do T11-R4).
+    """
+    utils = getattr(yt_dlp, "utils", None)
+    extractor_error = getattr(utils, "ExtractorError", None)
+    typed = isinstance(extractor_error, type) and isinstance(error, extractor_error)
+    if not typed and not any(marker in str(error).lower() for marker in _EXTRACTION_MARKERS):
+        return None
+
+    detail = str(error).strip()
+    if detail.upper().startswith("ERROR:"):
+        detail = detail[len("ERROR:") :].strip()
+    return ExtractionError(
+        f"Falha de extração: {detail} — nada foi baixado nem publicado; "
+        "atualize o yt-dlp e tente de novo"
+    )
 
 
 def _which_ffmpeg() -> str | None:
@@ -454,6 +493,12 @@ class DownloadManager:
                     # Cancelamento (usuário) ou encerramento (shutdown): quem
                     # sinalizou marca o estado; aqui só fechamos se ninguém fechou.
                     self._finish_cancelled(task)
+                elif (extraction := _extraction_error(e, yt_dlp)) is not None:
+                    # T11-R4/Q-D: falha de extração ganha o rótulo da raiz
+                    # (ExtractionError) com a próxima ação; o log preserva o
+                    # detalhe cru (a mensagem da tarefa é mascarada).
+                    logger.warning("Extração falhou para %s: %s", task.id, e)
+                    self._set_failed(task, str(extraction))
                 elif isinstance(e, yt_dlp.utils.DownloadError):
                     self._set_failed(task, str(e))
                 else:

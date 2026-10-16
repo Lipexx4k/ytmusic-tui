@@ -46,8 +46,13 @@ class _FakeDownloadError(Exception):
     pass
 
 
+class _FakeExtractorError(Exception):
+    """Irmã de ``_FakeDownloadError`` (como no yt-dlp real, que NÃO herda)."""
+
+
 class _FakeUtils:
     DownloadError = _FakeDownloadError
+    ExtractorError = _FakeExtractorError
 
 
 class _FakeYoutubeDL:
@@ -970,6 +975,117 @@ def test_shutdown_keeps_interrupted_row(manager, store):
     row = store.find(task.id)
     assert row is not None
     assert row.status == DownloadStatus.INTERRUPTED.value
+
+
+# ===== T11-R4/Q-D: falha de extração do yt-dlp vira ExtractionError =====
+
+
+def _extraction_fails_with(error: Exception):
+    """yt-dlp falso cujo ``download`` levanta a falha de extração dada."""
+
+    class _FailYoutubeDL:
+        def __init__(self, opts: dict):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls: list[str]) -> None:
+            raise error
+
+    return _FailYoutubeDL
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (
+            _FakeExtractorError("ERROR: [youtube] abc: Unable to extract player response"),
+            "Unable to extract player response",
+        ),
+        (
+            _FakeDownloadError("ERROR: [youtube] abc: unable to extract player response"),
+            "unable to extract player response",
+        ),
+        (
+            _FakeDownloadError("ERROR: [youtube] abc: No video formats found!"),
+            "No video formats found!",
+        ),
+        (
+            _FakeDownloadError("ERROR: Unsupported URL: gefaked://x"),
+            "Unsupported URL: gefaked://x",
+        ),
+        (
+            _FakeDownloadError("ERROR: [youtube] abc: Sign in to confirm you're not a bot"),
+            "Sign in to confirm you're not a bot",
+        ),
+    ],
+    ids=["tipo", "marcador-unable", "marcador-formats", "marcador-url", "marcador-signin"],
+)
+def test_extraction_failure_is_labeled_with_next_action(
+    manager, monkeypatch, tmp_path, error, detail
+):
+    """R4: extração falhou → rótulo da raiz + ação; nada publicado (INV-1).
+
+    Vale para o tipo ``ExtractorError`` e para o mesmo erro embrulhado num
+    ``DownloadError`` (como o yt-dlp real entrega); o detalhe original vai
+    preservado (sem o prefixo "ERROR:") e o "nada foi baixado nem publicado"
+    registra o INV-1.
+    """
+    monkeypatch.setattr(
+        download_mod, "_load_yt_dlp", lambda: _fake_ytdlp(_extraction_fails_with(error))
+    )
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert result.error is not None
+    assert result.error.startswith("Falha de extração: ")
+    assert detail in result.error
+    assert "ERROR:" not in result.error
+    assert "nada foi baixado nem publicado" in result.error
+    assert "atualize o yt-dlp e tente de novo" in result.error
+    # INV-1: extração é a PRIMEIRA etapa — nada no destino nem no temporário.
+    assert not (tmp_path / "A").exists()
+    assert list((tmp_path / ".tmp").iterdir()) == []
+
+
+def test_real_extractor_error_type_is_recognized(manager, monkeypatch, tmp_path):
+    """R4: o ``ExtractorError`` do yt-dlp REAL é reconhecido pelo tipo."""
+    yt_dlp = pytest.importorskip("yt_dlp")
+    error = yt_dlp.utils.ExtractorError("ERROR: [youtube] abc: falha de extração tipada")
+
+    monkeypatch.setattr(
+        download_mod,
+        "_load_yt_dlp",
+        lambda: SimpleNamespace(utils=yt_dlp.utils, YoutubeDL=_extraction_fails_with(error)),
+    )
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert result.error is not None
+    assert result.error.startswith("Falha de extração: ")
+    assert "falha de extração tipada" in result.error
+
+
+def test_other_download_errors_keep_todays_message(manager, monkeypatch, tmp_path):
+    """R4 (controle −): ``DownloadError`` fora da extração segue como hoje."""
+    error = _FakeDownloadError("HTTP Error 503: Service Unavailable")
+    monkeypatch.setattr(
+        download_mod, "_load_yt_dlp", lambda: _fake_ytdlp(_extraction_fails_with(error))
+    )
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+
+    result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.FAILED
+    assert result.error == "HTTP Error 503: Service Unavailable"
 
 
 if __name__ == "__main__":

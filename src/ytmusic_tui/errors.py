@@ -11,13 +11,15 @@ A taxonomia da API (T10-R2) dá à UI e ao retry o que cada falha pede:
 - ``ServiceUnavailableError`` — o serviço respondeu e recusou (sem retry);
 - ``NotFoundError``           — recurso inexistente (HTTP 404, sem retry);
 - ``InvalidResponseError``    — resposta fora do contrato (T08);
-- ``ExtractionError``         — resposta válida sem dados reproduzíveis
-  (reservado; o produtor chega com o T11 — ex.: "Sign in to confirm").
+- ``ExtractionError``         — resposta válida sem dados reproduzíveis; no
+  download é a falha do yt-dlp ao extrair a URL (T11-R4 — ex.: "Unable to
+  extract", "Sign in to confirm you're not a bot").
 
 ``retryable`` como atributo de classe é a política do T10-R3: só falha
 transitória (``NetworkError``, ``RateLimitError``, HTTP 5xx) é re-tentada.
 O classificador puro (exceção crua → erro interno) vive em
-``ytmusic_tui.api.classify``.
+``ytmusic_tui.api.classify``; a tradução da falha de extração do yt-dlp
+vive em ``download._extraction_error`` (T11-R4).
 """
 
 __all__ = [
@@ -94,9 +96,12 @@ class InvalidResponseError(APIError):
 
 
 class ExtractionError(APIError):
-    """Resposta válida, mas sem dados reproduzíveis (reservado ao T11).
+    """Resposta válida, mas sem dados reproduzíveis (produtor: T11-R4).
 
-    Definido agora para a taxonomia do §11-R2 ficar completa e o mapeamento
-    testável; o produtor real chega com o T11 (resolução de stream/yt-dlp,
-    ex.: "Sign in to confirm you're not a bot").
+    No download é a falha do yt-dlp ao EXTRAIR a URL de watch — a primeira
+    etapa: nada foi baixado nem publicado (INV-1). Sinais: o tipo
+    ``ExtractorError`` ou mensagens estáveis ("Unable to extract", "no
+    video formats", "Unsupported URL", "Sign in to confirm"). O player não
+    passa por aqui: a mensagem do mpv vai como veio (classificar texto de
+    terceiro não é confiável — decisão do T11-R4).
     """
