@@ -1113,6 +1113,12 @@ async def test_settings_inputs_apply(monkeypatch, tmp_path):
         screen._apply_text_setting("setting-concurrent", "2")
         assert saved["download_concurrent"] == 2
 
+        # A UI normaliza ANTES da API (T06-R4): a API recusa fora de 1–10.
+        screen._apply_text_setting("setting-concurrent", "42")
+        assert saved["download_concurrent"] == 10
+        screen._apply_text_setting("setting-concurrent", "0")
+        assert saved["download_concurrent"] == 1
+
         target = tmp_path / "downloads"
         screen._apply_text_setting("setting-download-dir", str(target))
         assert saved["download_dir"] == target

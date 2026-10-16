@@ -632,6 +632,38 @@ async def test_set_concurrent_recreates_executor_and_respects_new_limit(manager,
     assert all(task.status is DownloadStatus.COMPLETED for task in tasks)
 
 
+def test_set_concurrent_validates_instead_of_clamping(manager):
+    """T06-R4: inválido levanta (tipo → ``TypeError``; faixa → ``ValueError``).
+
+    Antes, ``max(1, min(10, workers))`` ajustava em silêncio: um valor
+    digitado errado virava um limite diferente do pedido sem ninguém saber.
+    Agora a API recusa e NADA é recriado; quem normaliza para o usuário é a
+    UI da aba Config (testado em ``test_tui.py``).
+    """
+    executor = manager._executor
+
+    with pytest.raises(TypeError, match="int"):
+        manager.set_concurrent("2")
+    with pytest.raises(TypeError, match="int"):
+        manager.set_concurrent(2.0)
+    with pytest.raises(TypeError, match="int"):
+        manager.set_concurrent(True)  # bool é subtipo de int, mas não é "quantidade"
+
+    with pytest.raises(ValueError, match="fora da faixa"):
+        manager.set_concurrent(0)
+    with pytest.raises(ValueError, match="fora da faixa"):
+        manager.set_concurrent(11)
+
+    assert manager._executor is executor  # recusou sem recriar o executor
+
+    # Extremos são válidos de verdade (não "clampados"): 1 e 10 passam.
+    manager.set_concurrent(1)
+    first = manager._executor
+    assert first is not executor
+    manager.set_concurrent(10)
+    assert manager._executor is not first
+
+
 @pytest.mark.asyncio
 async def test_cancelled_never_becomes_completed(manager, monkeypatch):
     """Corrida cancelar × worker: CANCELLED nunca vira COMPLETED (§4.4).

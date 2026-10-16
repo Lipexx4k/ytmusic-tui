@@ -4,6 +4,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from pydantic_settings import SettingsConfigDict
 
 from ytmusic_tui.config import Settings
@@ -54,6 +55,26 @@ def test_settings_validation(tmp_path, monkeypatch):
 
     assert settings.mpv_volume == 75
     assert settings.download_concurrent == 5
+
+
+def test_download_concurrent_is_validated_1_to_10(tmp_path, monkeypatch):
+    """T06-R4: a faixa de downloads simultâneos é validada, nunca clampada.
+
+    A mesma faixa que o gerenciador aplica (``set_concurrent``) é barrada
+    aqui, na fonte (TOML/ambiente) — um ``config.toml`` errado nunca chega
+    em memória como um limite diferente do escrito.
+    """
+    monkeypatch.setenv("YTMUSIC_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("YTMUSIC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("YTMUSIC_CACHE_DIR", str(tmp_path / "cache"))
+
+    monkeypatch.setenv("YTMUSIC_DOWNLOAD_CONCURRENT", "11")
+    with pytest.raises(ValidationError):
+        isolated_settings(tmp_path / "ausente.toml")()
+
+    monkeypatch.setenv("YTMUSIC_DOWNLOAD_CONCURRENT", "0")
+    with pytest.raises(ValidationError):
+        isolated_settings(tmp_path / "ausente.toml")()
 
 
 def test_library_db_path(tmp_path, monkeypatch):

@@ -22,6 +22,12 @@ from ytmusic_tui.permissions import secure_directory, secure_file
 # (config_dir é uma das configurações carregadas do próprio arquivo).
 DEFAULT_CONFIG_FILE = Path(user_config_dir("ytmusic-tui")) / "config.toml"
 
+# Faixa aceita de downloads simultâneos (T06-R4). A validação vive aqui
+# (pydantic, para TOML/ambiente) e o gerenciador recusa valores fora dela —
+# nenhum ponto ajusta em silêncio. Quem normaliza para o usuário é a UI.
+MIN_DOWNLOAD_CONCURRENT = 1
+MAX_DOWNLOAD_CONCURRENT = 10
+
 
 def _toml_literal(value: object) -> str:
     """Serializa um valor simples para TOML (str, bool, int, float)."""
@@ -116,8 +122,8 @@ class Settings(BaseSettings):
     )
     download_concurrent: int = Field(
         default=3,
-        ge=1,
-        le=10,
+        ge=MIN_DOWNLOAD_CONCURRENT,
+        le=MAX_DOWNLOAD_CONCURRENT,
         description="Downloads simultâneos",
     )
     embed_metadata: bool = Field(

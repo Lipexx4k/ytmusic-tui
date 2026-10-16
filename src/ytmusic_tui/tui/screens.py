@@ -26,7 +26,7 @@ from textual.widgets import (
 )
 
 from ytmusic_tui.api import SearchResult, ytmusic
-from ytmusic_tui.config import settings
+from ytmusic_tui.config import MAX_DOWNLOAD_CONCURRENT, MIN_DOWNLOAD_CONCURRENT, settings
 from ytmusic_tui.diagnostics import mask_diagnostics
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.player import TrackInfo, player
@@ -420,7 +420,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
                 settings.update_and_save(download_quality=value or "320")
                 self._toast(f"Qualidade do download: {value or '320'}")
             elif input_id == "setting-concurrent":
-                concurrent = max(1, min(10, int(value)))
+                # A UI normaliza antes da API (T06-R4): o valor salvo e
+                # aplicado está sempre na faixa aceita pelo gerenciador.
+                concurrent = max(MIN_DOWNLOAD_CONCURRENT, min(MAX_DOWNLOAD_CONCURRENT, int(value)))
                 settings.update_and_save(download_concurrent=concurrent)
                 download_manager.set_concurrent(concurrent)
                 self._toast(f"Downloads simultâneos: {concurrent}")

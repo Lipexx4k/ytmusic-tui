@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ytmusic_tui.config import settings
+from ytmusic_tui.config import MAX_DOWNLOAD_CONCURRENT, MIN_DOWNLOAD_CONCURRENT, settings
 from ytmusic_tui.diagnostics import mask_diagnostics
 
 # Pipeline de disco (§5.1/T03): validação, reserva, publicação e fsync.
@@ -137,12 +137,25 @@ class DownloadManager:
         )
 
     def set_concurrent(self, workers: int) -> None:
-        """Recria o executor com novo limite de downloads simultâneos.
+        """Recria o executor com novo limite de downloads simultâneos (T06-R4).
+
+        Entrada validada, nunca ajustada em silêncio: tipo errado (inclui
+        ``bool``, que é ``int`` em Python) → ``TypeError``; fora de
+        ``MIN_DOWNLOAD_CONCURRENT``–``MAX_DOWNLOAD_CONCURRENT`` → ``ValueError``
+        — e nada é recriado. Quem normaliza para o usuário é quem chama (a aba
+        Config já limita antes de salvar); a API interna prefere recusar a
+        aceitar um limite diferente do pedido.
 
         Tarefas já enviadas ao executor antigo seguem nele (``wait=False``
         sem ``cancel_futures``); novas submissões usam o executor novo.
         """
-        workers = max(1, min(10, workers))
+        if isinstance(workers, bool) or not isinstance(workers, int):
+            raise TypeError(f"workers deve ser int (recebido: {type(workers).__name__})")
+        if not (MIN_DOWNLOAD_CONCURRENT <= workers <= MAX_DOWNLOAD_CONCURRENT):
+            raise ValueError(
+                f"workers fora da faixa {MIN_DOWNLOAD_CONCURRENT}–"
+                f"{MAX_DOWNLOAD_CONCURRENT}: {workers}"
+            )
         old = self._executor
         self._executor = ThreadPoolExecutor(max_workers=workers)
         old.shutdown(wait=False)
