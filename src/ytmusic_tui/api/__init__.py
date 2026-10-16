@@ -19,12 +19,17 @@ cada chamada passa pela política de retry em ``api.retry`` — só falha
 transitória re-tenta, com backoff e teto; a busca aceita ``should_abort``
 para o usuário abandonar as tentativas (a primeira sempre roda, A1).
 
+Cache (T10-R4): busca (TTL 5 min) e álbum (TTL 24h) são servidos do disco
+quando recentes — o arquivo guarda o payload dos modelos (``api.models``),
+nunca URL de stream; falha de cache nunca quebra a operação (best-effort).
+
 ``get_stream_url`` é o único ponto público de URL de watch; o player e o
 pipeline de download ainda montam a própria URL internamente (a dedup fica
 no T11 — seam documentado no plano).
 """
 
 import functools
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -34,11 +39,15 @@ import requests
 from ytmusicapi import YTMusic
 
 from ytmusic_tui.api.adapt import album_detail_from_raw, search_result_from_raws
+from ytmusic_tui.api.cache import ResponseCache, cache_key
 from ytmusic_tui.api.models import AlbumDetail, SearchResult
 from ytmusic_tui.api.retry import RetryPolicy, call_with_retry
+from ytmusic_tui.config import settings
 from ytmusic_tui.errors import InvalidResponseError
 
 __all__ = ["AlbumDetail", "SearchResult", "YTMusicAPI", "ytmusic"]
+
+logger = logging.getLogger("ytmusic_tui.api")
 
 T = TypeVar("T")
 
@@ -75,12 +84,14 @@ class YTMusicAPI:
         *,
         policy: RetryPolicy | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        cache: ResponseCache | None = None,
     ) -> None:
         self._client: YTMusic | None = None
         self._initialized = False
         self.last_error: str = ""
         self._policy = policy or RetryPolicy()
         self._sleep = sleep
+        self._cache = cache
 
     def initialize(self) -> bool:
         """Inicializa o cliente YTMusic em modo anônimo (sem login).
@@ -121,6 +132,12 @@ class YTMusicAPI:
             raise RuntimeError("YTMusic não inicializado.")
         return self._client
 
+    def _get_cache(self) -> ResponseCache:
+        """Cache em disco (lazy: o diretório sai do ``settings`` na 1ª leitura)."""
+        if self._cache is None:
+            self._cache = ResponseCache(settings.cache_dir / "api")
+        return self._cache
+
     def _call(
         self,
         operation: Callable[[], T],
@@ -154,7 +171,15 @@ class YTMusicAPI:
         validação de forma do T08 roda dentro de ``search_result_from_raws``.
         ``should_abort`` corta as NOVAS tentativas quando o usuário já
         abandonou a busca (T10-R3; a primeira tentativa sempre roda, A1).
+        Busca recente (TTL 5 min, T10-R4) sai do cache: zero rede.
         """
+        cache = self._get_cache()
+        key = cache_key(query, songs_limit, albums_limit)
+        cached = cache.get("search", key)
+        if cached is not None:
+            logger.debug('cache hit na busca "%s"', query)
+            return SearchResult.from_payload(cached)
+
         # Resolver o cliente antes de paralelizar: o visitor id anônimo é
         # inicializado de forma lazy na primeira requisição.
         client = self._require_client()
@@ -173,7 +198,10 @@ class YTMusicAPI:
                 context=context,
                 should_abort=should_abort,
             )
-            return search_result_from_raws(tracks_future.result(), albums_future.result())
+            result = search_result_from_raws(tracks_future.result(), albums_future.result())
+
+        cache.put("search", key, result.to_payload())
+        return result
 
     def get_album(self, browse_id: str) -> AlbumDetail:
         """Obtém detalhes do álbum como modelo interno (T10-R1), com retry.
@@ -181,8 +209,16 @@ class YTMusicAPI:
         Sem ``should_abort`` por design: a carga é disparada por worker
         exclusivo (abrir outro álbum cancela o anterior) e o teto de
         tentativas já limita o esforço; a política fina de "resultado velho
-        não sobrescreve novo" é o T12-R2.
+        não sobrescreve novo" é o T12-R2. Álbum recente (TTL 24h, T10-R4)
+        sai do cache: zero rede.
         """
+        cache = self._get_cache()
+        key = cache_key(browse_id)
+        cached = cache.get("album", key)
+        if cached is not None:
+            logger.debug("cache hit no álbum %s", browse_id)
+            return AlbumDetail.from_payload(cached)
+
         raw = self._call(
             lambda: self._require_client().get_album(browse_id),
             context=f"álbum {browse_id}",
@@ -191,7 +227,9 @@ class YTMusicAPI:
             raise InvalidResponseError(
                 f"resposta inesperada da API: esperado dict, recebido {type(raw).__name__}"
             )
-        return album_detail_from_raw(raw)
+        detail = album_detail_from_raw(raw)
+        cache.put("album", key, detail.to_payload())
+        return detail
 
     def get_stream_url(self, video_id: str) -> str:
         """URL de watch para reprodução/download via yt-dlp.

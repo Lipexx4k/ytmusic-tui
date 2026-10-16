@@ -74,6 +74,10 @@ def _l2_isolated_app_state(tmp_path, monkeypatch):
     download_dir = tmp_path / "app-downloads"
     download_dir.mkdir()
     monkeypatch.setattr(global_settings, "download_dir", download_dir)
+    # Cache da API no tmp do teste (T10-R4): a busca pode acertar cache entre
+    # chamadas — nunca entre testes, e nunca o cache real do usuário.
+    monkeypatch.setattr(global_settings, "cache_dir", tmp_path / "api-cache")
+    monkeypatch.setattr(api_module.ytmusic, "_cache", None)
 
 
 @pytest.fixture

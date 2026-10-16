@@ -10,6 +10,8 @@ próprio ``DatabaseManager`` com um caminho temporário não são afetados.
 
 import pytest
 
+from ytmusic_tui.api import ytmusic
+from ytmusic_tui.config import settings
 from ytmusic_tui.library.database import db_manager
 
 
@@ -40,3 +42,16 @@ def _isolated_library_db(tmp_path, monkeypatch):
     db_manager.migrate()
     yield
     db_manager.close()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cache_dir(tmp_path, monkeypatch):
+    """Redireciona o cache da API para ``tmp_path`` (T10-R4).
+
+    Sem isto, os testes que exercitam ``search_catalog``/``get_album`` de
+    verdade (transportes falsos) gravariam no cache real do usuário — e um
+    teste poderia "acertar" cache deixado por outro. O singleton é resetado
+    para reconstruir o cache a partir do diretório isolado na 1ª leitura.
+    """
+    monkeypatch.setattr(settings, "cache_dir", tmp_path / "cache")
+    monkeypatch.setattr(ytmusic, "_cache", None)
