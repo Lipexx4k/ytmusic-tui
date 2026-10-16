@@ -1,15 +1,54 @@
 """Ponto de entrada do pacote ``ytmusic_tui``.
 
 Permite iniciar a aplicação via console script (``ytmusic-tui``), com
-``python -m ytmusic_tui`` ou ``python main.py``. Delega para
-:func:`ytmusic_tui.tui.app.main`.
+``python -m ytmusic_tui`` ou ``python main.py``. Sem argumentos abre a TUI
+(``ytmusic_tui.tui.app.main``); o subcomando ``doctor`` roda o diagnóstico
+do ambiente (``ytmusic_tui.doctor``) sem abrir a interface (§13.3/T13).
 """
 
+import argparse
 import sys
 
+__all__ = ["main"]
 
-def main() -> None:
-    """Inicia a TUI; sem o mpv instalado, mostra um erro amigável.
+
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI mínima: sem comando abre a TUI; ``doctor`` diagnostica."""
+    parser = argparse.ArgumentParser(
+        prog="ytmusic-tui",
+        description=(
+            "YouTube Music no terminal. Sem argumentos abre a TUI; "
+            "`doctor` verifica o ambiente sem abrir a interface."
+        ),
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("doctor",),
+        help="comando opcional (padrão: abrir a TUI)",
+    )
+    return parser
+
+
+def _doctor_exit_code() -> int:
+    """Roda o ``doctor``; falha ao carregar a configuração vira diagnóstico."""
+    from ytmusic_tui.errors import ConfigError
+
+    try:
+        from ytmusic_tui.doctor import run_doctor
+    except ConfigError as exc:  # pragma: no cover - depende do sistema
+        print(
+            f"ytmusic-tui doctor não conseguiu preparar os diretórios do usuário: {exc}\n"
+            "Verifique as permissões dos diretórios de dados/configuração "
+            "(`YTMUSIC_DATA_DIR`, `YTMUSIC_CONFIG_DIR`).",
+            file=sys.stderr,
+        )
+        return 1
+    return run_doctor()
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Inicia a TUI (padrão) ou roda o ``doctor``; sem mpv, mensagem amigável.
 
     O import de ``mpv`` (python-mpv) carrega a libmpv do sistema e falha com
     ``OSError`` se ela não existir — o melhor primeiro contato possível com
@@ -17,6 +56,10 @@ def main() -> None:
     ``ConfigError`` (diretório de dados inacessível etc.) segue o mesmo
     princípio: mensagem curta e saída limpa (§8.3/T06).
     """
+    args = _build_parser().parse_args(argv)
+    if args.command == "doctor":
+        raise SystemExit(_doctor_exit_code())
+
     from ytmusic_tui.errors import ConfigError
 
     try:
@@ -38,9 +81,6 @@ def main() -> None:
         )
         raise SystemExit(1) from None
     run()
-
-
-__all__ = ["main"]
 
 
 if __name__ == "__main__":
