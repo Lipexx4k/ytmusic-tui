@@ -1,11 +1,15 @@
 # Atualizações semanais de dependências: cada PR roda o CI (ruff + suíte
-# offline em Python 3.11/3.13 + pip-audit), então atualizações problemáticas
-# aparecem na hora — importante com serviços externos que mudam com
-# frequência.
+# offline em Python 3.11/3.13 + pip-audit sobre o conjunto travado), então
+# atualizações problemáticas aparecem na hora — importante com serviços
+# externos que mudam com frequência.
+#
+# T07: ecossistema `uv` — o Dependabot lê o `uv.lock` e o `pyproject.toml`
+# e propõe a atualização nos dois juntos; como o CI instala com
+# `uv sync --locked`, um PR que deixe lock e pyproject divergentes falha.
 version: 2
 
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
