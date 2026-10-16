@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,11 +15,15 @@ from ytmusic_tui.download.pipeline import (
     DestinationBusy,
     InvalidInputError,
     MediaValidationError,
+    PathEscapeError,
     PipelineError,
+    build_output_template,
     discard_task_files,
+    final_path_for,
     publish_file,
     release,
     reserve,
+    resolve_within,
     validate_input,
     validate_media_file,
 )
@@ -62,19 +65,6 @@ def _load_yt_dlp() -> Any:
 
         _yt_dlp_module = yt_dlp
     return _yt_dlp_module
-
-
-def _truncate_bytes(name: str, max_bytes: int) -> str:
-    """Corta ``name`` para caber em ``max_bytes`` (UTF-8) sem quebrar caractere.
-
-    O limite de 255 bytes por componente de caminho (ext4, APFS, NTFS...)
-    conta bytes, não caracteres: 100 caracteres CJK ocupam 300 bytes, então
-    um corte apenas por caracteres não basta para nomes multibyte.
-    """
-    encoded = name.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return name
-    return encoded[:max_bytes].decode("utf-8", errors="ignore").strip(" .")
 
 
 class DownloadManager:
@@ -119,29 +109,14 @@ class DownloadManager:
         self._executor = ThreadPoolExecutor(max_workers=workers)
         old.shutdown(wait=False)
 
-    def _sanitize_filename(self, name: str, max_len: int = 120) -> str:
-        """Sanitiza nome de arquivo (também limita o tamanho)."""
-        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
-        return name.strip(" .")[:max_len]
-
     def _get_output_template(self, task: DownloadTask) -> str:
-        """Gera template de saída para yt-dlp."""
-        # Limites conservadores para não estourar o máximo de 255 bytes por
-        # componente do caminho em sistemas de arquivos comuns. O limite é
-        # em BYTES: títulos com caracteres multibyte (acentos, CJK, emoji)
-        # estouram antes do limite de caracteres, então cortamos também por
-        # bytes — com folga para os sufixos do yt-dlp (extensão, .part, .webp).
-        artist = self._sanitize_filename(task.artist or "Unknown Artist", 60)
-        title = self._sanitize_filename(task.title or "Unknown Title", 100)
-        album = self._sanitize_filename(task.album or "Unknown Album", 60)
-        artist = _truncate_bytes(artist, 120) or "Unknown Artist"
-        album = _truncate_bytes(album, 120) or "Unknown Album"
-        stem = _truncate_bytes(f"{title} - {artist}", 240) or "Unknown Title"
-
-        # Estrutura: Artist/Album/Track - Artist.ext
-        if album and album != "Unknown Album":
-            return str(settings.download_dir / artist / album / f"{stem}.%(ext)s")
-        return str(settings.download_dir / artist / f"{stem}.%(ext)s")
+        """Template de saída do yt-dlp — normalização única do §8.1/T06."""
+        return build_output_template(
+            download_dir=settings.download_dir,
+            artist=task.artist,
+            title=task.title,
+            album=task.album,
+        )
 
     def _get_ydl_options(self, task: DownloadTask, outtmpl: str | None = None) -> dict[str, Any]:
         """Opções do yt-dlp para download.
@@ -256,8 +231,14 @@ class DownloadManager:
             task.progress = 100.0
 
     def _final_path_for(self, task: DownloadTask) -> Path:
-        """Caminho final publicado (extensão = formato configurado)."""
-        return Path(self._get_output_template(task).replace("%(ext)s", settings.download_format))
+        """Caminho final publicado — mesma composição do template (§8.1)."""
+        return final_path_for(
+            download_dir=settings.download_dir,
+            artist=task.artist,
+            title=task.title,
+            album=task.album,
+            extension=settings.download_format,
+        )
 
     def _configured_bitrate(self) -> int:
         """Bitrate da configuração (fallback 320 quando não numérico)."""
@@ -415,6 +396,10 @@ class DownloadManager:
 
             try:
                 temp = validate_media_file(task.file_path, settings.download_format)
+                # §8.1/T06: revalida a contenção imediatamente antes de
+                # publicar — um diretório trocado por symlink DURANTE o
+                # download não publica nada fora de download_dir.
+                resolve_within(final_path, download_dir)
                 publish_file(temp, final_path)
             except (PipelineError, OSError) as e:
                 logger.warning("Publicação falhou para %s: %s", task.id, e)
@@ -484,6 +469,15 @@ class DownloadManager:
             track_id=track_id,
         )
         self._queue.append(task)
+        # §8.1/T06: destino que resolve fora de download_dir (symlink no
+        # caminho, por exemplo) NÃO é persistido — nada há para recuperar, e
+        # a validação de entrada do worker reprova a tarefa com a mesma
+        # causa (o erro aparece na fila; nunca se grava uma linha armadilha).
+        try:
+            resolve_within(self._final_path_for(task), settings.download_dir)
+        except PathEscapeError as e:
+            logger.warning("Destino fora de download_dir para %s (%s)", task.id, e)
+            return task
         # Persistir a intenção de baixar ANTES de começar (T04-R1): se o app
         # morrer entre enfileirar e terminar, a linha vira a pista da próxima
         # execução. O caminho final é derivado agora (o template não muda).
@@ -639,15 +633,33 @@ class DownloadManager:
         caminhos. Sem a linha (falha de escrita do espelho), cai para o
         template atual — que é determinístico em (título, artista, álbum,
         formato).
+
+        §8.1/T06: os caminhos da linha só são usados se resolverem DENTRO do
+        ``download_dir`` corrente — linha adulterada (ou download_dir antigo)
+        vira log + fallback, nunca operação de disco fora da árvore de
+        downloads (retomar/descartar não podem apagar arquivo de terceiros).
         """
+        download_dir = settings.download_dir
         try:
             row = self._store.find(task.id)
         except Exception:
             logger.warning("Falha ao ler a linha persistida de %s", task.id, exc_info=True)
             row = None
         if row is not None and row.final_path and row.download_dir:
-            return Path(row.download_dir) / TMP_DIR_NAME, Path(row.final_path)
-        return settings.download_dir / TMP_DIR_NAME, self._final_path_for(task)
+            persisted_temp = Path(row.download_dir) / TMP_DIR_NAME
+            persisted_final = Path(row.final_path)
+            try:
+                resolve_within(persisted_temp, download_dir)
+                resolve_within(persisted_final, download_dir)
+            except PathEscapeError as e:
+                logger.warning(
+                    "Linha persistida de %s fora de download_dir (%s); usando o template atual",
+                    task.id,
+                    e,
+                )
+            else:
+                return persisted_temp, persisted_final
+        return download_dir / TMP_DIR_NAME, self._final_path_for(task)
 
     def retry_interrupted(self, task_id: str) -> DownloadTask | None:
         """Cria a nova tentativa de uma tarefa INTERRUPTED (T04-R2/R3).

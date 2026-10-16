@@ -21,15 +21,34 @@ Garantias principais:
 - **Nunca sobrescrever**: destino existente → política Q2(a) no chamador
   (pular com aviso); se o destino aparecer entre a reserva e o ``replace``,
   a publicação é recusada (``OverwriteRefusedError``).
+- **Normalização única e contenção pós-resolve** (§8.1/T06 · INV-5): todo
+  caminho de download nasce de ``final_path_for``/``build_output_template``
+  (uma única função de normalização, com os limites históricos congelados)
+  e a contenção em ``download_dir`` é validada DEPOIS do ``resolve``
+  (``resolve_within``/``PathEscapeError``) — inclusive antes de publicar e
+  ao ler caminhos persistidos (T04), que podem estar adulterados.
 """
 
 import hashlib
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ytmusic_tui.download.errors import (
+    DestinationBusy,
+    InvalidInputError,
+    MediaValidationError,
+    OverwriteRefusedError,
+    PathEscapeError,
+    PipelineError,
+)
+
 __all__ = [
+    "FALLBACK_ALBUM",
+    "FALLBACK_ARTIST",
+    "FALLBACK_TITLE",
     "QUARANTINE_DIR_NAME",
     "SUPPORTED_FORMATS",
     "TMP_DIR_NAME",
@@ -37,13 +56,19 @@ __all__ = [
     "InvalidInputError",
     "MediaValidationError",
     "OverwriteRefusedError",
+    "PathEscapeError",
     "PipelineError",
     "Reservation",
+    "build_output_template",
     "discard_task_files",
+    "final_path_for",
+    "normalize_component",
     "publish_file",
     "release",
     "reserve",
     "reservation_key",
+    "resolve_within",
+    "truncate_bytes",
     "validate_input",
     "validate_media_file",
 ]
@@ -60,25 +85,11 @@ QUARANTINE_DIR_NAME = ".quarantine"
 #: Formatos de saída suportados (espelha o ``format_map`` do gerenciador).
 SUPPORTED_FORMATS = frozenset({"mp3", "opus", "m4a", "flac"})
 
-
-class PipelineError(Exception):
-    """Erro do pipeline de publicação (base)."""
-
-
-class InvalidInputError(PipelineError, ValueError):
-    """Entrada inválida (passo 1 do §5.1)."""
-
-
-class DestinationBusy(PipelineError, RuntimeError):
-    """O nome final já está reservado por outra tarefa."""
-
-
-class MediaValidationError(PipelineError):
-    """Arquivo de mídia ausente, vazio, ilegível ou com extensão errada."""
-
-
-class OverwriteRefusedError(PipelineError, FileExistsError):
-    """O destino apareceu depois da reserva; sobrescrever seria silencioso."""
+#: Fallbacks de metadados vazios (§8.1/T06) — nomes históricos, congelados:
+#: mudar qualquer um renomearia arquivos já persistidos (T04/Q2).
+FALLBACK_ARTIST = "Unknown Artist"
+FALLBACK_ALBUM = "Unknown Album"
+FALLBACK_TITLE = "Unknown Title"
 
 
 @dataclass(frozen=True)
@@ -101,6 +112,111 @@ def reservation_key(final_path: Path) -> str:
     return hashlib.sha256(str(final_path).encode("utf-8")).hexdigest()[:16]
 
 
+def truncate_bytes(name: str, max_bytes: int) -> str:
+    """Corta ``name`` para caber em ``max_bytes`` (UTF-8) sem quebrar caractere.
+
+    O limite de 255 bytes por componente de caminho (ext4, APFS, NTFS...)
+    conta bytes, não caracteres: 100 caracteres CJK ocupam 300 bytes, então
+    um corte apenas por caracteres não basta para nomes multibyte.
+    """
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return name
+    return encoded[:max_bytes].decode("utf-8", errors="ignore").strip(" .")
+
+
+def normalize_component(
+    raw: str,
+    *,
+    default: str,
+    max_chars: int,
+    max_bytes: int | None = None,
+) -> str:
+    """Normaliza UM componente de caminho de download (§8.1/T06).
+
+    Função única usada por todos os fluxos (via ``final_path_for``/
+    ``build_output_template``): separadores (``/``, ``\\``), caracteres
+    proibidos em outros sistemas (``<>:"|?*``) e de controle (``\\x00-\\x1f``,
+    incluindo DEL ``\\x7f`` — endurecimento intencional do T06) viram ``_``;
+    espaços/pontos das pontas somem (nada de ``..``, nomes ocultos ou
+    componentes de caminho vindos de metadados).
+
+    O corte é primeiro em caracteres e depois em BYTES (``max_bytes``): o
+    limite real do filesystem (255 bytes/componente) não é o mesmo que 255
+    caracteres com multibyte. ``default`` cobre a entrada vazia — como no
+    comportamento histórico, um valor que vira vazio SÓ depois da
+    sanitização não recebe o default aqui; o fallback final (artista/álbum/
+    stem) é do compositor ``_normalized_components``.
+    """
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", raw or default)
+    name = name.strip(" .")[:max_chars]
+    if max_bytes is not None:
+        name = truncate_bytes(name, max_bytes)
+    return name
+
+
+def _destination_dir(download_dir: Path, artist: str, album: str) -> Path:
+    """``Artista/Álbum`` — ou só ``Artista`` quando o álbum é desconhecido."""
+    if album == FALLBACK_ALBUM:
+        return download_dir / artist
+    return download_dir / artist / album
+
+
+def _normalized_components(artist: str, title: str, album: str) -> tuple[str, str, str]:
+    """(artista, álbum, stem) normalizados, com os limites históricos.
+
+    Os cortes (60/100/60 caracteres; 120/120/240 bytes) são os mesmos desde
+    a T01/T02: mudá-los renomearia arquivos já persistidos (T04/Q2 e adotados
+    pelo Q2(a)). Qualquer alteração exige migração de caminhos + decisão de
+    produto — a prova de não-regressão é o corpus congelado nos testes.
+    """
+    artist_name = (
+        normalize_component(artist, default=FALLBACK_ARTIST, max_chars=60, max_bytes=120)
+        or FALLBACK_ARTIST
+    )
+    album_name = (
+        normalize_component(album, default=FALLBACK_ALBUM, max_chars=60, max_bytes=120)
+        or FALLBACK_ALBUM
+    )
+    title_name = normalize_component(title, default=FALLBACK_TITLE, max_chars=100)
+    stem = truncate_bytes(f"{title_name} - {artist_name}", 240) or FALLBACK_TITLE
+    return artist_name, album_name, stem
+
+
+def build_output_template(*, download_dir: Path, artist: str, title: str, album: str) -> str:
+    """Template de saída do yt-dlp (``%(ext)s``) para uma faixa (§8.1/T06).
+
+    Estrutura histórica: ``Artista/Álbum/Faixa - Artista.ext`` — ou
+    ``Artista/Faixa - Artista.ext`` quando o álbum é desconhecido.
+    """
+    artist_name, album_name, stem = _normalized_components(artist, title, album)
+    return str(_destination_dir(download_dir, artist_name, album_name) / f"{stem}.%(ext)s")
+
+
+def final_path_for(
+    *, download_dir: Path, artist: str, title: str, album: str, extension: str
+) -> Path:
+    """Caminho final publicado (extensão real) — mesma composição do template."""
+    artist_name, album_name, stem = _normalized_components(artist, title, album)
+    return _destination_dir(download_dir, artist_name, album_name) / f"{stem}.{extension}"
+
+
+def resolve_within(candidate: Path, base: Path) -> Path:
+    """Resolve ``candidate`` e exige que o resultado fique DENTRO de ``base``.
+
+    Contrato do §8.1: a validação é feita **depois** do ``resolve``, nunca
+    antes — symlinks e ``..`` são resolvidos primeiro e não driblam a
+    contenção por comparação textual. ``resolve`` sem ``strict`` (padrão)
+    não exige que o destino exista: resolve o que existe no caminho e mantém
+    o resto. Devolve o caminho resolvido; quem precisa da forma original
+    (chave de reserva estável) usa o valor de entrada.
+    """
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(base.resolve()):
+        raise PathEscapeError(f"caminho fora de download_dir: {candidate}")
+    return resolved
+
+
 def validate_input(
     *,
     video_id: str,
@@ -110,19 +226,19 @@ def validate_input(
 ) -> None:
     """Valida a entrada do pipeline (passo 1 do §5.1).
 
-    Defesa em profundidade contra destinos fora de ``download_dir`` (o
-    sanitizador de nomes é a primeira linha; o endurecimento completo de
-    caminhos é T06) e contra formatos não suportados.
+    Defesa em profundidade contra destinos fora de ``download_dir``
+    (INV-5): a contenção é validada **depois** do resolve (``resolve_within``
+    → ``PathEscapeError``), então symlinks no caminho não escapam; o destino
+    também não pode ficar nos diretórios de trabalho do pipeline
+    (``.tmp``/``.quarantine``).
     """
     if not video_id or not video_id.strip():
         raise InvalidInputError("video_id vazio")
     if audio_format.lower() not in SUPPORTED_FORMATS:
         raise InvalidInputError(f"formato não suportado: {audio_format!r}")
 
+    resolved_final = resolve_within(final_path, download_dir)
     resolved_dir = download_dir.resolve()
-    resolved_final = final_path.resolve()
-    if not resolved_final.is_relative_to(resolved_dir):
-        raise InvalidInputError(f"destino fora de download_dir: {final_path}")
     for special in (TMP_DIR_NAME, QUARANTINE_DIR_NAME):
         if resolved_final.is_relative_to(resolved_dir / special):
             raise InvalidInputError(f"destino não pode ficar em {special}/: {final_path}")
