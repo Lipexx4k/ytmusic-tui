@@ -54,17 +54,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: "3.13"
+          enable-cache: true
 
-      - name: Instalar o app (com dependências de dev)
-        run: pip install -e ".[dev]"
+      # T07: gate de sincronia — pyproject.toml e uv.lock não podem divergir.
+      - name: Lockfile em sincronia (uv lock --check)
+        run: uv lock --check
 
-      # --skip-editable: o pacote local não está no PyPI e não é auditável;
-      # o alvo são as dependências (runtime e dev).
-      - name: Vulnerabilidades conhecidas (pip-audit)
-        run: pip-audit --skip-editable
+      # O alvo da auditoria é o conjunto TRAVADO (runtime + dev), não o
+      # ambiente flutuante: exporta o resolve do lock para um requirements e
+      # audita esse arquivo. `--no-emit-project` deixa o pacote local de fora
+      # (não está no PyPI e não é auditável) — substitui o antigo
+      # `--skip-editable`.
+      - name: Exportar o conjunto travado (uv export)
+        run: uv export --frozen --no-emit-project --extra dev --no-hashes -o /tmp/locked-requirements.txt
+
+      # O pip-audit também vem do lock (extra dev, pinado) — nada flutuante.
+      - name: Vulnerabilidades conhecidas (pip-audit no conjunto travado)
+        run: uv run --locked --extra dev pip-audit -r /tmp/locked-requirements.txt
 
   # Verifica que o artefato publicável (sdist + wheel) instala e importa em
   # um ambiente limpo — é o que o `pip install` do usuário final executa.
