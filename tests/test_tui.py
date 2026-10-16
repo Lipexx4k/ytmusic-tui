@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,8 @@ from textual.widgets import (
     Tabs,
 )
 
+import ytmusic_tui.download as download_mod
+from tests.security._fakes import FakeDownloadError, FakeYoutubeDL, fake_yt_dlp
 from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
@@ -1122,6 +1125,28 @@ async def test_settings_inputs_apply(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_settings_dir_error_toast_masks_home(monkeypatch, tmp_path):
+    """OSError ao trocar o diretório de downloads aparece mascarado (§8.3/T06)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        def _boom(self, **kwargs):
+            raise OSError(f"disco cheio ao gravar {Path.home()}/.config/config.toml")
+
+        monkeypatch.setattr(type(settings), "update_and_save", _boom)
+        screen._apply_text_setting("setting-download-dir", str(tmp_path / "downloads"))
+
+        joined = "\n".join(toasts)
+        assert "Não foi possível usar o diretório" in joined
+        assert str(Path.home()) not in joined
+        assert "~/.config" in joined
+
+
+@pytest.mark.asyncio
 async def test_config_tab_widgets_apply_on_interaction(monkeypatch):
     """Wiring real: Enter no input de volume e toggle do checkbox salvam."""
     app = YTMusicTUI()
@@ -1283,6 +1308,59 @@ async def test_download_failure_shows_toast_with_error(monkeypatch):
         await screen._run_download(DownloadTask(video_id="abc", title="Faixa"))
 
         assert any("Falha no download" in t and "Video unavailable" in t for t in toasts)
+
+
+@pytest.mark.asyncio
+async def test_download_failure_toast_masks_home_and_signed_url(monkeypatch, tmp_path):
+    """Ponta a ponta (§8.3/T06): erro do yt-dlp chega à TUI mascarado.
+
+    O worker REAL do gerenciador roda com um yt-dlp falso que falha com o
+    tipo de mensagem que o yt-dlp de verdade produz (caminho absoluto do
+    HOME + URL assinada com token). Nem o toast nem ``task.error`` (fonte
+    da tabela de downloads) podem conter um nem outro; o contexto segue
+    legível para o usuário entender a falha.
+    """
+
+    class _FailingYdl(FakeYoutubeDL):
+        def download(self, urls: list[str]) -> None:
+            raise FakeDownloadError(
+                "ERROR: unable to download video data: HTTP Error 403: Forbidden "
+                f"(arquivo: {Path.home()}/Music/f.mp3) "
+                "url=https://rr1---sn-xyz.googlevideo.com/videoplayback?expire=1&sig=SEGREDO123"
+            )
+
+    monkeypatch.setattr(download_mod, "_load_yt_dlp", lambda: fake_yt_dlp(_FailingYdl))
+    monkeypatch.setattr(settings, "download_dir", tmp_path / "library")
+    # Testes anteriores desta suíte encerram o app e derrubam o executor do
+    # singleton; o teste e2e injeta um executor próprio e vivo.
+    executor = ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(download_manager, "_executor", executor)
+
+    app = YTMusicTUI()
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            toasts: list[str] = []
+            monkeypatch.setattr(screen, "_toast", toasts.append)
+
+            task = download_manager.queue_download(
+                video_id="abc", title="Faixa", artist="Artista", album="Álbum"
+            )
+            await screen._run_download(task)
+    finally:
+        executor.shutdown(wait=True)
+
+    joined = "\n".join(toasts)
+    assert "Falha no download" in joined
+    assert str(Path.home()) not in joined
+    assert "SEGREDO123" not in joined
+    assert "googlevideo.com" in joined  # contexto continua legível
+
+    assert task.status is DownloadStatus.FAILED
+    assert task.error is not None
+    assert str(Path.home()) not in task.error
+    assert "SEGREDO123" not in task.error
 
 
 @pytest.mark.asyncio

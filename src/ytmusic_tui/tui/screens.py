@@ -27,6 +27,7 @@ from textual.widgets import (
 
 from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
+from ytmusic_tui.diagnostics import mask_diagnostics
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.download_controller import DownloadController
@@ -426,7 +427,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         except (TypeError, ValueError):
             self._toast("Valor inválido")
         except OSError as exc:
-            self._toast(f"Não foi possível usar o diretório: {exc}")
+            # §8.3/T06: erro do sistema traz caminho absoluto — exibe mascarado.
+            self._toast(f"Não foi possível usar o diretório: {mask_diagnostics(str(exc))}")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Reproduz o item selecionado (ou abre o álbum) em uma lista."""

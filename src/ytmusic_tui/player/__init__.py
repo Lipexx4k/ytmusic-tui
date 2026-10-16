@@ -15,6 +15,7 @@ from typing import Any
 import mpv
 
 from ytmusic_tui.config import settings
+from ytmusic_tui.diagnostics import mask_diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -225,8 +226,17 @@ class MPVPlayer:
                 self._emit("error", {"message": data.get("error", "Erro desconhecido")})
 
     def _emit(self, event: str, data: dict[str, Any] | None = None) -> None:
-        """Emite evento para callbacks registrados."""
-        player_event = PlayerEvent(event=event, data=data or {})
+        """Emite evento para callbacks registrados.
+
+        §8.3/T06: eventos de erro carregam texto de terceiros (mpv/ytdl
+        hook) que pode trazer caminho do HOME ou URL assinada — só a
+        ``message`` do erro passa por ``mask_diagnostics``; dados de faixa e
+        de posição NUNCA são tocados (são do usuário, não diagnóstico).
+        """
+        payload = data or {}
+        if event == "error" and "message" in payload:
+            payload = {**payload, "message": mask_diagnostics(str(payload["message"]))}
+        player_event = PlayerEvent(event=event, data=payload)
         for callback in self._callbacks:
             try:
                 callback(player_event)

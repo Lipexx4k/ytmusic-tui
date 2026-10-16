@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ytmusic_tui.config import settings
+from ytmusic_tui.diagnostics import mask_diagnostics
 
 # Pipeline de disco (§5.1/T03): validação, reserva, publicação e fsync.
 from ytmusic_tui.download.pipeline import (
@@ -348,11 +349,16 @@ class DownloadManager:
     def _set_failed(task: DownloadTask, error: str) -> None:
         """Marca FAILED se a máquina permitir; nunca sobrescreve terminal.
 
+        §8.3/T06: este é o ponto ÚNICO em que ``task.error`` é escrito com
+        texto de terceiro (yt-dlp/OS) — a mensagem é mascarada aqui, então a
+        tabela de downloads, o toast de falha e o espelho nunca veem caminho
+        do HOME nem URL com token. O log preserva o detalhe cru.
+
         Em corrida com cancelamento/shutdown (que fecham a tarefa antes), a
         transição já não é válida e o estado final existente é preservado.
         """
         if task.can_transition_to(DownloadStatus.FAILED):
-            task.error = error
+            task.error = mask_diagnostics(error)
             task.transition_to(DownloadStatus.FAILED)
 
     @staticmethod

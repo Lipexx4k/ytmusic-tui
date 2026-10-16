@@ -16,6 +16,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from ytmusic_tui.diagnostics import mask_diagnostics
+
 __all__ = [
     "AudioFileMissingError",
     "BackupFailedError",
@@ -104,11 +106,13 @@ def describe_library_error(error: LibraryError) -> str:
     Devolve a mensagem do caso + o detalhe original em parênteses (caminho,
     versão, backup) — a UI não decide nada por string do sqlite3. Tipo
     desconhecido cai no ``str(error)`` puro (nunca esconde o erro).
+    O texto final passa por ``mask_diagnostics`` (§8.3/T06): o toast mostra
+    ``~`` no lugar do HOME e URL sem query/credenciais; o log mantém o cru.
     """
     for error_type, hint in _ERROR_HINTS:
         if isinstance(error, error_type):
-            return f"{hint} ({error})"
-    return str(error)
+            return mask_diagnostics(f"{hint} ({error})")
+    return mask_diagnostics(str(error))
 
 
 #: Trechos (casefold) que denunciam arquivo corrompido/estranho no sqlite3.
