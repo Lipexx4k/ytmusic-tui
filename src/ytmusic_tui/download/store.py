@@ -29,8 +29,10 @@ limpeza de idade.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 
 from ytmusic_tui.download.pipeline import TMP_DIR_NAME, reservation_key
 from ytmusic_tui.download.task import ACTIVE_STATUSES, DownloadStatus, DownloadTask
@@ -162,10 +164,16 @@ class DownloadTaskStore:
         """
         active_values = tuple(status.value for status in ACTIVE_STATUSES)
         with self.db.session() as session:
-            result = session.execute(
-                update(DownloadTaskRecord)
-                .where(DownloadTaskRecord.status.in_(active_values))
-                .values(status=DownloadStatus.INTERRUPTED.value, updated_at=utcnow())
+            # ``cast``: o stub do SQLAlchemy tipa ``execute(update(...))``
+            # como ``Result`` genérico; em DML o retorno real é
+            # ``CursorResult`` (único com ``rowcount``).
+            result = cast(
+                "CursorResult[Any]",
+                session.execute(
+                    update(DownloadTaskRecord)
+                    .where(DownloadTaskRecord.status.in_(active_values))
+                    .values(status=DownloadStatus.INTERRUPTED.value, updated_at=utcnow())
+                ),
             )
             return int(result.rowcount or 0)
 
