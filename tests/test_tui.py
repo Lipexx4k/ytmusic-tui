@@ -1206,6 +1206,21 @@ async def test_quit_does_not_hang():
     assert app.return_code == 0
 
 
+def test_ui_callbacks_tolerate_no_screen_on_stack():
+    """Regressão do flake do teardown: timer pode ticar sem tela na pilha (T08).
+
+    Na corrida baseline do T08, o ``set_interval`` de 0,5 s de
+    ``_refresh_downloads_ui`` disparou entre o fechamento das telas e o
+    ``stop`` do timer em ``on_unmount``: ``self.screen`` levantou
+    ``ScreenStackError`` e o ``run_test`` falhou com a exceção do timer.
+    Chamar os callbacks direto com a pilha vazia reproduz o instante exato,
+    sem depender do agendamento do Textual.
+    """
+    app = YTMusicTUI()
+    app._refresh_downloads_ui()
+    app._handle_player_event(PlayerEvent(event="position", data={"position": 1, "duration": 3}))
+
+
 @pytest.mark.asyncio
 async def test_tabs_are_clickable_with_mouse():
     """Regressão: a regra catch-all `*:focus { border: ... }` do app.tcss dava

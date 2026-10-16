@@ -15,7 +15,7 @@ import contextlib
 import logging
 import threading
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.timer import Timer
 from textual.widgets import TabbedContent
@@ -96,10 +96,25 @@ class YTMusicTUI(App):
         with contextlib.suppress(Exception):  # app encerrando
             self.call_from_thread(self._handle_player_event, event)
 
+    def _current_main_screen(self) -> MainScreen | None:
+        """Tela principal ativa, ou ``None`` se não houver tela na pilha.
+
+        O timer da UI e os observers do player podem disparar durante o
+        encerramento — entre o fechamento das telas e o ``stop`` do timer em
+        ``on_unmount``. Nesse instante ``self.screen`` levanta
+        ``ScreenStackError``; o app não pode morrer no teardown (flake
+        reproduzido pela suíte completa na corrida baseline do T08).
+        """
+        try:
+            screen = self.screen
+        except ScreenStackError:
+            return None
+        return screen if isinstance(screen, MainScreen) else None
+
     def _handle_player_event(self, event: PlayerEvent) -> None:
         """Atualiza a UI em resposta a um evento do player."""
-        screen = self.screen
-        if not isinstance(screen, MainScreen):
+        screen = self._current_main_screen()
+        if screen is None:
             return
         try:
             np_bar = screen.query_one("#now-playing", NowPlayingBar)
@@ -140,8 +155,8 @@ class YTMusicTUI(App):
 
     def _refresh_downloads_ui(self) -> None:
         """Atualiza a tabela de downloads (somente quando a aba está ativa)."""
-        screen = self.screen
-        if not isinstance(screen, MainScreen):
+        screen = self._current_main_screen()
+        if screen is None:
             return
         try:
             tabs = screen.query_one("#main-tabs", TabbedContent)
