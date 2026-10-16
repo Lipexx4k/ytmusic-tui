@@ -56,6 +56,19 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   ffmpeg e yt-dlp validados, com comandos de checagem) e subseção
   **"Releases e atualizações"** (release = commit + versão + CI verde, manual;
   fluxo Dependabot → PR → CI → merge) (T07)
+- Camada L2 de testes (T08): integração local **sem rede** (bloqueio autouse
+  de `socket`, com mensagem clara) e falsos reais — yt-dlp stubado no import
+  tardio e **ffmpeg como script executável de verdade no PATH** — cobrindo
+  download completo, conversão falhando (exit ≠ 0), ffmpeg ausente com o que
+  instalar, conversão lenta + cancelamento do usuário, extração com erro,
+  disco cheio (ENOSPC real do kernel), busca offline e com resposta
+  malformada, SQLite inacessível (nunca "biblioteca vazia") e app morto com
+  `SIGKILL` no meio do download — recuperado na sessão seguinte pelo caminho
+  real do worker
+- Busca valida a forma da resposta da API (T08): lista malformada vira erro
+  tipado (`InvalidResponseError`) com mensagem "esperado × recebido", em vez
+  de um `AttributeError` genérico — músicas e álbuns são validados antes do
+  uso, e a UI mostra o caso sem mudanças
 
 ### Alterado
 
@@ -90,6 +103,10 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   "pacote" do CI confere o conteúdo do artefato (wheel e sdist) antes de
   instalar e uma guarda de fonte garante o arquivo ao lado de `app.py`
   (T06.1)
+- O timer que atualiza a tabela de downloads podia derrubar o app durante o
+  encerramento (acessava a tela sem verificar se ainda havia telas na
+  pilha): agora tolera o instante — como os eventos do player — e um teste
+  de regressão reproduz o caso exato (T08)
 
 ### Segurança
 

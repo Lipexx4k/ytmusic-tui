@@ -4,13 +4,13 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-319%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-337%20passando-brightgreen)
 ![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **319 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **337 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -301,7 +301,7 @@ ou anexar a uma issue.
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 319 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 337 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -324,7 +324,7 @@ ytmusic-tui/
 │       ├── screens.py         # MainScreen: abas, atalhos e navegação
 │       ├── widgets.py         # Widgets personalizados (listas, barra do player)
 │       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
-└── tests/                     # 319 testes offline (pytest) + integração opt-in
+└── tests/                     # 337 testes em camadas (L1 mocks + L2 local) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento
@@ -334,8 +334,13 @@ git clone https://github.com/Lipexx4k/ytmusic-tui
 cd ytmusic-tui
 uv sync --locked --extra dev    # cria/atualiza o .venv a partir do uv.lock
 
-# Testes (offline, tudo com mocks)
+# Testes (offline, tudo com mocks — L1 + L2)
 .venv/bin/python -m pytest tests/ -q
+
+# Cobertura de branches de download/biblioteca/player (informativa, sem threshold)
+.venv/bin/python -m pytest tests/ -q \
+  --cov=ytmusic_tui.download --cov=ytmusic_tui.library --cov=ytmusic_tui.player \
+  --cov-branch --cov-report=term
 
 # Lint
 .venv/bin/ruff check src/ tests/
@@ -353,9 +358,9 @@ uv export --frozen --no-emit-project --extra dev --no-hashes -o /tmp/ytm-locked.
 
 O **[uv](https://docs.astral.sh/uv/)** é a ferramenta de desenvolvimento/CI: o `uv.lock` fixa as versões exatas de runtime + dev e o CI instala dele (`uv sync --locked`). Se `pyproject.toml` e `uv.lock` divergirem, o `--locked` falha de propósito — depois de editar dependências, rode `uv lock`. Sem uv? `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` continua funcionando (sem o lockfile — é o CI que o usa).
 
-Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
+Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca, em duas camadas offline: **L1** (unit/comportamento, com mocks finos) e **L2** (`tests/integration_local/` — integração local com worker, reserva/temporários e banco de verdade, e falsos "de verdade": yt-dlp stubado no import tardio e um ffmpeg **executável** no PATH). **Nenhum teste da suíte padrão toca a rede nem o player de verdade** — a L2 bloqueia `socket` de propósito, então qualquer conexão falha na hora com mensagem clara; a cobertura de branches (comando acima) é informativa, sem threshold; os testes de integração reais são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
 
-O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, **instalando do `uv.lock`** (`uv sync --locked` — o job falha se o lock estiver ausente ou fora de sincronia com o `pyproject.toml`), um job de segurança que exporta o conjunto travado e roda `pip-audit` (falha em vulnerabilidade conhecida) e um job de pacote que confere o conteúdo do wheel/sdist e instala o wheel num ambiente limpo.
+O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, **instalando do `uv.lock`** (`uv sync --locked` — o job falha se o lock estiver ausente ou fora de sincronia com o `pyproject.toml`), um job de segurança que exporta o conjunto travado e roda `pip-audit` (falha em vulnerabilidade conhecida) e um job de pacote que confere o conteúdo do wheel/sdist e instala o wheel num ambiente limpo. A cobertura de branches (download, biblioteca e player) roda no job de testes como passo **informativo** — sem threshold e sem bloquear o CI —, numa perna só (Python 3.13).
 
 As dependências são atualizadas pelo **Dependabot** (PRs semanais, grupos dev/runtime — com o lockfile, ele atualiza `uv.lock` e `pyproject.toml` juntos): o CI roda em cada PR, então uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende de serviços externos que mudam com frequência (YouTube, mpv, yt-dlp).
 

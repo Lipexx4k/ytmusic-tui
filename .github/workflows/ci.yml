@@ -48,6 +48,14 @@ jobs:
       - name: Testes (offline, com mocks)
         run: .venv/bin/python -m pytest tests/ -q
 
+      # T08: cobertura de branches INFORMATIVA em download/, library/ e
+      # player/ — sem threshold. Passo separado e não bloqueante de propósito:
+      # o gate de testes é o passo acima e não pode ser mascarado por este.
+      - name: Cobertura de branches (informativa, sem threshold)
+        if: matrix.python-version == '3.13'
+        continue-on-error: true
+        run: .venv/bin/python -m pytest tests/ -q --cov=ytmusic_tui.download --cov=ytmusic_tui.library --cov=ytmusic_tui.player --cov-branch --cov-report=term
+
   seguranca:
     runs-on: ubuntu-latest
 
