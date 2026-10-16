@@ -355,7 +355,7 @@ class LibraryService:
             )
 
     def toggle_like(self, track_id: int) -> bool:
-        """Alterna status de 'gostei' da faixa."""
+        """Alterna status de 'gostei' da faixa (uma transação — R3/T05)."""
         with self.db.session() as session:
             track = session.get(Track, track_id)
             if track:
@@ -391,6 +391,9 @@ class LibraryService:
         Usado antes de enfileirar um download: assim o arquivo baixado já
         nasce vinculado a uma faixa da biblioteca. Artistas e álbum
         desconhecidos (sem browseId) recebem IDs locais determinísticos.
+
+        Faixa, artistas, álbum e vínculos gravam numa transação só (R3/T05):
+        falha no meio → rollback completo, nada parcial.
         """
         with self.db.session() as session:
             track = self.get_or_create_track(
@@ -482,7 +485,8 @@ class LibraryService:
             )
 
     def add_track_to_playlist(self, playlist_id: int, track_id: int, position: int = -1) -> bool:
-        """Adiciona faixa à playlist."""
+        """Adiciona faixa à playlist (deslocamento, entrada e contador numa
+        transação só — R3/T05)."""
         with self.db.session() as session:
             playlist = session.get(Playlist, playlist_id)
             track = session.get(Track, track_id)
@@ -518,7 +522,8 @@ class LibraryService:
             return True
 
     def remove_track_from_playlist(self, playlist_id: int, track_id: int) -> bool:
-        """Remove faixa da playlist."""
+        """Remove faixa da playlist (entrada e contador numa transação só —
+        R3/T05)."""
         with self.db.session() as session:
             result = session.execute(
                 select(PlaylistTrack).where(
@@ -535,7 +540,8 @@ class LibraryService:
         return False
 
     def reorder_playlist_tracks(self, playlist_id: int, track_ids: list[int]) -> bool:
-        """Reordena faixas da playlist."""
+        """Reordena faixas da playlist (todos os UPDATEs numa transação só —
+        R3/T05: falha no meio → ordem original intacta)."""
         with self.db.session() as session:
             for pos, track_id in enumerate(track_ids, 1):
                 session.execute(
@@ -557,7 +563,8 @@ class LibraryService:
         completed: bool = False,
         source: str = "library",
     ) -> None:
-        """Registra reprodução no histórico."""
+        """Registra reprodução no histórico (histórico e contadores numa
+        transação só — R3/T05)."""
         with self.db.session() as session:
             history = PlaybackHistory(
                 track_id=track_id,
