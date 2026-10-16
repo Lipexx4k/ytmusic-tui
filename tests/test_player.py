@@ -20,6 +20,7 @@ class _FakeMpv:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.played: str | None = None
+        self.end_file_cb = None  # observer de end-file capturado (T11-R2)
 
     def property_observer(self, name):
         def wrapper(fn):
@@ -29,6 +30,8 @@ class _FakeMpv:
 
     def event_callback(self, *event_types):
         def wrapper(fn):
+            if event_types == ("end-file",):
+                self.end_file_cb = fn
             return fn
 
         return wrapper
@@ -268,6 +271,107 @@ def test_yt_dlp_path_is_passed_to_the_hook(monkeypatch):
     assert p._mpv is not None
     assert p._mpv.kwargs["script_opts"] == "ytdl_hook-ytdl_path=/opt/venv/yt-dlp"
     p.shutdown()
+
+
+# ===== Teardown: guarda de eventos e callbacks (T11-R2) =====
+
+
+class _FakeEndFile:
+    """Evento ``end-file`` mínimo, com ``as_dict`` como o python-mpv entrega."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def as_dict(self) -> dict:
+        return self._data
+
+
+def _started_player(monkeypatch) -> tuple[MPVPlayer, _FakeMpv]:
+    """Player com fake mpv já iniciado (handle e observer capturados)."""
+    monkeypatch.setattr(player_mod.mpv, "MPV", _FakeMpv)
+    monkeypatch.setattr(player_mod.settings, "mpv_volume", 42)
+    monkeypatch.setattr(player_mod.settings, "mpv_audio_quality", "high")
+    p = MPVPlayer()
+    assert p.start() is True
+    assert p._mpv is not None
+    return p, p._mpv
+
+
+def test_events_after_shutdown_never_reach_callbacks(monkeypatch):
+    """T11-R2: evento atrasado do handle morto é descartado pela guarda.
+
+    O fake captura o observer de ``end-file`` registrado pelo ``start``;
+    depois do ``shutdown()``, chamá-lo — como a thread de eventos do libmpv
+    faria na janela de encerramento — não entrega NADA ao callback.
+    """
+    p, fake = _started_player(monkeypatch)
+    received: list[str] = []
+    p.on_event(lambda e: received.append(e.event))
+    assert fake.end_file_cb is not None
+
+    p.next_track()  # antes do shutdown: entrega normal
+    assert received == ["next"]
+
+    p.shutdown()
+    fake.end_file_cb(_FakeEndFile({"reason": "error", "error": "caiu"}))
+    p.next_track()
+
+    assert received == ["next"]  # nada depois do shutdown
+
+
+def test_start_after_shutdown_resumes_events(monkeypatch):
+    """T11-R2: um novo ``start()`` reabre a entrega de eventos."""
+    p, _ = _started_player(monkeypatch)
+    received: list[str] = []
+    p.on_event(lambda e: received.append(e.event))
+
+    p.shutdown()
+    p.next_track()
+    assert received == []
+
+    assert p.start() is True
+    p.next_track()
+    assert received == ["next"]
+
+
+def test_failed_start_after_shutdown_still_emits_error(monkeypatch):
+    """T11-R2: a guarda não engole o erro do start falho (regressão do T06).
+
+    Se a guarda fosse um simples "handle é None", o caminho mais provável em
+    produção (libmpv ausente) ficaria mudo — o evento ``error`` é justamente
+    o que precisa chegar à UI como toast.
+    """
+    p, _ = _started_player(monkeypatch)
+    received: list[str] = []
+    p.on_event(lambda e: received.append(e.event))
+    p.shutdown()
+
+    class _Explode:
+        def __init__(self, **kwargs):
+            raise OSError("sem libmpv")
+
+    monkeypatch.setattr(player_mod.mpv, "MPV", _Explode)
+    assert p.start() is False
+    assert received == ["error"]
+    assert p.state is PlayerState.ERROR
+
+
+def test_remove_callback_is_idempotent_and_ignores_unknown(monkeypatch):
+    """T11-R2: ``remove_callback`` pode repetir e nunca quebra com estranho."""
+    p, _ = _started_player(monkeypatch)
+    received: list[str] = []
+
+    def cb(event):
+        received.append(event.event)
+
+    p.on_event(cb)
+    p.next_track()
+    p.remove_callback(cb)
+    p.remove_callback(cb)  # idempotente: remover de novo não quebra
+    p.remove_callback(lambda e: None)  # nunca registrado: ignorado
+    p.next_track()
+
+    assert received == ["next"]
 
 
 if __name__ == "__main__":

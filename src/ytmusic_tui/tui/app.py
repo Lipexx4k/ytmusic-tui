@@ -169,6 +169,10 @@ class YTMusicTUI(App):
         """Limpeza ao sair."""
         if self._ui_timer:
             self._ui_timer.stop()
+        # T11-R2: sai da lista antes de encerrar — um app desmontado não pode
+        # voltar a receber eventos se o player for reiniciado (novo mount no
+        # mesmo processo, como nos testes).
+        player.remove_callback(self._on_player_event)
         player.shutdown()
         download_manager.shutdown()
         db_manager.close()

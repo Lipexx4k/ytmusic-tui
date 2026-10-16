@@ -1243,6 +1243,20 @@ def test_ui_callbacks_tolerate_no_screen_on_stack():
 
 
 @pytest.mark.asyncio
+async def test_unmount_deregistra_o_callback_do_player():
+    """T11-R2: o app desmontado sai da lista de callbacks do player.
+
+    Sem isso, o callback de uma TUI fechada ficaria registrado no singleton:
+    um novo ``start()`` (testes, novo mount no mesmo processo) voltaria a
+    entregar eventos a ela — "callback morto chamado".
+    """
+    app = YTMusicTUI()
+    async with app.run_test():
+        assert app._on_player_event in player._callbacks
+    assert app._on_player_event not in player._callbacks
+
+
+@pytest.mark.asyncio
 async def test_tabs_are_clickable_with_mouse():
     """Regressão: a regra catch-all `*:focus { border: ... }` do app.tcss dava
     borda ao `Tabs` quando ele ganhava foco com o clique; a borda estourava as

@@ -69,6 +69,10 @@ class MPVPlayer:
         self._observers_started = False
         self._last_position_emit = 0.0
         self._warned_missing_yt_dlp = False
+        #: Guarda de encerramento (T11-R2): depois do ``shutdown()``, eventos
+        #: atrasados do handle morto são descartados; um novo ``start()``
+        #: reabre a entrega.
+        self._shutdown = False
         self.last_event_error: str | None = None
 
     def _ensure_mpv_started(self) -> None:
@@ -124,8 +128,12 @@ class MPVPlayer:
         handle (libmpv ausente, init recusado) vira estado ERROR + evento
         ``error`` (a UI mostra um toast) e ``False`` — nunca uma exceção do
         mpv subindo para o loop da TUI. ``shutdown()`` é o encerramento
-        explícito; depois dele, um novo ``start()`` cria um handle novo.
+        explícito; depois dele, um novo ``start()`` cria um handle novo e
+        reabre a entrega de eventos (T11-R2).
         """
+        # Reabre a entrega ANTES de qualquer emissão: o start que falha
+        # (libmpv ausente) também precisa do evento ``error`` chegando à UI.
+        self._shutdown = False
         if self._mpv is not None:
             return True
         try:
@@ -232,7 +240,14 @@ class MPVPlayer:
         hook) que pode trazer caminho do HOME ou URL assinada — só a
         ``message`` do erro passa por ``mask_diagnostics``; dados de faixa e
         de posição NUNCA são tocados (são do usuário, não diagnóstico).
+
+        Guarda de encerramento (T11-R2): depois do ``shutdown()`` e antes do
+        próximo ``start()``, eventos atrasados do handle morto são
+        descartados — nenhum callback (possivelmente de uma TUI já
+        desmontada) é chamado.
         """
+        if self._shutdown:
+            return
         payload = data or {}
         if event == "error" and "message" in payload:
             payload = {**payload, "message": mask_diagnostics(str(payload["message"]))}
@@ -349,7 +364,15 @@ class MPVPlayer:
         return None
 
     def shutdown(self) -> None:
-        """Encerra player completamente (idempotente; permite novo ``start``)."""
+        """Encerra player completamente (idempotente; permite novo ``start``).
+
+        T11-R2: fecha a entrega de eventos ANTES do ``terminate()`` — a
+        janela de encerramento (thread de eventos do libmpv morrendo) não
+        alcança callbacks. O ``terminate()`` do python-mpv destroi o core e
+        junta a thread de eventos; o mpv mata e reapa os filhos do hook
+        ytdl no destroy (INV-8 — provado com libmpv real na L2).
+        """
+        self._shutdown = True
         if self._mpv:
             with contextlib.suppress(Exception):
                 self._mpv.terminate()
