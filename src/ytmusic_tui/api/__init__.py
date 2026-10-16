@@ -1,4 +1,4 @@
-"""Wrapper para API do YouTube Music usando ytmusicapi (T10-R1).
+"""Wrapper para API do YouTube Music usando ytmusicapi (T10-R1/R3).
 
 Cliente anônimo (sem login): apenas os métodos que o app usa são expostos —
 ``search_catalog``, ``get_album`` e ``get_stream_url``. Os métodos sem
@@ -13,29 +13,74 @@ biblioteca remota, playlists remotas) seguem omitidas — com o cliente
 anônimo o ytmusicapi responde ``YTMusicUserError: Please provide
 authentication``; a biblioteca do app é local (SQLite).
 
+Resiliência (T10-R3): a sessão própria aplica timeouts separados de
+conexão × leitura (o default do ytmusicapi é um timeout único de 30s) e
+cada chamada passa pela política de retry em ``api.retry`` — só falha
+transitória re-tenta, com backoff e teto; a busca aceita ``should_abort``
+para o usuário abandonar as tentativas (a primeira sempre roda, A1).
+
 ``get_stream_url`` é o único ponto público de URL de watch; o player e o
 pipeline de download ainda montam a própria URL internamente (a dedup fica
 no T11 — seam documentado no plano).
 """
 
+import functools
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TypeVar
 
+import requests
 from ytmusicapi import YTMusic
 
 from ytmusic_tui.api.adapt import album_detail_from_raw, search_result_from_raws
 from ytmusic_tui.api.models import AlbumDetail, SearchResult
+from ytmusic_tui.api.retry import RetryPolicy, call_with_retry
 from ytmusic_tui.errors import InvalidResponseError
 
 __all__ = ["AlbumDetail", "SearchResult", "YTMusicAPI", "ytmusic"]
 
+T = TypeVar("T")
+
+#: Timeouts separados (T10-R3), em segundos: conexão × leitura.
+#:
+#: Pior caso documentado (Q-C): cada tentativa pode gastar 5s conectando +
+#: 15s lendo = 20s; 3 tentativas + backoff de 1,5s ≈ **61,5s** até desistir
+#: de uma busca travada — a busca típica leva ~2s, e o usuário abandona
+#: antes via ``should_abort`` (nova busca).
+CONNECT_TIMEOUT_S = 5.0
+READ_TIMEOUT_S = 15.0
+
+
+def _new_session() -> requests.Session:
+    """Sessão requests com timeouts separados — seam do ytmusicapi.
+
+    O ``YTMusic`` aceita ``requests_session`` (API pública documentada pelo
+    próprio ytmusicapi); a sessão própria substitui o timeout único de 30s
+    do default. O ``partial`` existe porque o ytmusicapi chama
+    ``session.post/get`` sem passar ``timeout``.
+    """
+    session = requests.Session()
+    session.request = functools.partial(  # type: ignore[method-assign]
+        session.request, timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)
+    )
+    return session
+
 
 class YTMusicAPI:
-    """Cliente para API do YouTube Music (fronteira tipada do T10-R1)."""
+    """Cliente para API do YouTube Music (fronteira tipada do T10-R1/R3)."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._client: YTMusic | None = None
         self._initialized = False
         self.last_error: str = ""
+        self._policy = policy or RetryPolicy()
+        self._sleep = sleep
 
     def initialize(self) -> bool:
         """Inicializa o cliente YTMusic em modo anônimo (sem login).
@@ -52,7 +97,8 @@ class YTMusicAPI:
         try:
             # YTMusic() anônimo não faz chamadas de rede no construtor; o
             # visitor id só é obtido de forma lazy na primeira requisição.
-            self._client = YTMusic()
+            # A sessão própria aplica os timeouts separados (T10-R3).
+            self._client = YTMusic(requests_session=_new_session())
             self._initialized = True
             self.last_error = ""
             return True
@@ -75,11 +121,28 @@ class YTMusicAPI:
             raise RuntimeError("YTMusic não inicializado.")
         return self._client
 
+    def _call(
+        self,
+        operation: Callable[[], T],
+        *,
+        context: str,
+        should_abort: Callable[[], bool] | None = None,
+    ) -> T:
+        """Executa ``operation`` com retry/classificação da política (T10-R3)."""
+        return call_with_retry(
+            operation,
+            policy=self._policy,
+            context=context,
+            sleep=self._sleep,
+            should_abort=should_abort,
+        )
+
     def search_catalog(
         self,
         query: str,
         songs_limit: int = 25,
         albums_limit: int = 15,
+        should_abort: Callable[[], bool] | None = None,
     ) -> SearchResult:
         """Busca músicas e álbuns em paralelo (duas requisições concorrentes).
 
@@ -89,19 +152,41 @@ class YTMusicAPI:
 
         A saída é sempre ``SearchResult`` com modelos internos (T10-R1); a
         validação de forma do T08 roda dentro de ``search_result_from_raws``.
+        ``should_abort`` corta as NOVAS tentativas quando o usuário já
+        abandonou a busca (T10-R3; a primeira tentativa sempre roda, A1).
         """
         # Resolver o cliente antes de paralelizar: o visitor id anônimo é
         # inicializado de forma lazy na primeira requisição.
         client = self._require_client()
+        context = f'busca "{query}"'
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            tracks_future = pool.submit(client.search, query, filter="songs", limit=songs_limit)
-            albums_future = pool.submit(client.search, query, filter="albums", limit=albums_limit)
+            tracks_future = pool.submit(
+                self._call,
+                lambda: client.search(query, filter="songs", limit=songs_limit),
+                context=context,
+                should_abort=should_abort,
+            )
+            albums_future = pool.submit(
+                self._call,
+                lambda: client.search(query, filter="albums", limit=albums_limit),
+                context=context,
+                should_abort=should_abort,
+            )
             return search_result_from_raws(tracks_future.result(), albums_future.result())
 
     def get_album(self, browse_id: str) -> AlbumDetail:
-        """Obtém detalhes do álbum como modelo interno (T10-R1)."""
-        raw = self._require_client().get_album(browse_id)
+        """Obtém detalhes do álbum como modelo interno (T10-R1), com retry.
+
+        Sem ``should_abort`` por design: a carga é disparada por worker
+        exclusivo (abrir outro álbum cancela o anterior) e o teto de
+        tentativas já limita o esforço; a política fina de "resultado velho
+        não sobrescreve novo" é o T12-R2.
+        """
+        raw = self._call(
+            lambda: self._require_client().get_album(browse_id),
+            context=f"álbum {browse_id}",
+        )
         if not isinstance(raw, dict):
             raise InvalidResponseError(
                 f"resposta inesperada da API: esperado dict, recebido {type(raw).__name__}"

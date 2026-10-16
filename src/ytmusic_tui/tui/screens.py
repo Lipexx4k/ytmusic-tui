@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import threading
 from pathlib import Path
 from typing import cast
 
@@ -75,6 +76,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._last_auto_next: float = 0.0
         # Álbum aberto na aba dedicada (modelo interno do T10-R1); usado pelo "a".
         self._current_album: AlbumDetail | None = None
+        # Nova busca marca o abort de retry da anterior (T10-R3, A1); None = sem busca.
+        self._search_abort: threading.Event | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -447,13 +450,22 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             self._render_search_message("Não foi possível inicializar a busca.")
             return
 
+        # Nova busca abandona a anterior (T10-R3, A1): o evento faz o retry
+        # parar de tentar — a PRIMEIRA tentativa de cada busca sempre roda.
+        if self._search_abort is not None:
+            self._search_abort.set()
+        self._search_abort = threading.Event()
+        abort = self._search_abort
+
         self._render_search_message("Buscando...")
 
         try:
             # search_catalog: músicas + álbuns em 2 requisições paralelas
             # (~2s no total, a mesma latência de uma busca só). A busca sem
             # filtro faria 1 requisição, mas caparia as músicas em ~5 itens.
-            results = await asyncio.to_thread(ytmusic.search_catalog, query)
+            results = await asyncio.to_thread(
+                ytmusic.search_catalog, query, should_abort=abort.is_set
+            )
             self.display_search_results(results)
         except Exception as e:
             # escape(): mensagens de erro podem conter [colchetes].

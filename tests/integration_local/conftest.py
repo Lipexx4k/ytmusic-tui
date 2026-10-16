@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import ytmusic_tui.api as api_module
 import ytmusic_tui.download as download_mod
 from tests.integration_local._fakes import install_settings, install_yt_dlp
 from ytmusic_tui.config import settings as global_settings
@@ -50,6 +51,16 @@ def _block_network(monkeypatch):
 
     monkeypatch.setattr(socket, "create_connection", _blocked)
     monkeypatch.setattr(socket.socket, "connect", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def _instant_retry_sleep(monkeypatch):
+    """Retry sem espera real na L2 (o sleep é injetável, T10-R3).
+
+    As buscas desta camada falham de propósito; sem isto o backoff do retry
+    (0,5s + 1,0s por tentativa extra) atrasaria a suíte sem testar nada.
+    """
+    monkeypatch.setattr(api_module.ytmusic, "_sleep", lambda seconds: None)
 
 
 @pytest.fixture(autouse=True)

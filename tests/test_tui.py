@@ -218,6 +218,31 @@ async def test_second_search_does_not_raise_duplicate_ids():
 
 
 @pytest.mark.asyncio
+async def test_nova_busca_abandona_retry_da_anterior(monkeypatch):
+    """Nova busca seta o abort da anterior; a nova começa sem abort (T10-R3)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        aborts: list = []
+
+        def _capture(query, songs_limit=25, albums_limit=15, should_abort=None):
+            aborts.append(should_abort)
+            return SearchResult()
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _capture)
+
+        await screen.perform_search("primeira")
+        await pilot.pause()
+        await screen.perform_search("segunda")
+        await pilot.pause()
+
+        assert aborts[0] is not None and aborts[0]() is True  # abandonada
+        assert aborts[1] is not None and aborts[1]() is False  # em curso
+
+
+@pytest.mark.asyncio
 async def test_search_message_accepts_brackets():
     """Mensagens de erro da busca podem conter [colchetes]."""
     app = YTMusicTUI()
