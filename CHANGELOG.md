@@ -6,6 +6,8 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+## [0.1.3] - 2026-10-16
+
 ### Adicionado
 
 - Publicação atômica de downloads (T03): o arquivo vai para um temporário em
