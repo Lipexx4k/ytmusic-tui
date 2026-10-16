@@ -16,9 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      # T07: o ambiente de teste vem do uv.lock (resolve universal que cobre
+      # 3.11–3.13), não de ranges flutuantes. O `--locked` falha se o lockfile
+      # estiver ausente ou fora de sincronia com o pyproject.toml.
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
       # A libmpv é carregada no import de `mpv` (python-mpv), e o
       # ctypes.util.find_library procura tanto `libmpv.so.2` quanto o link
@@ -27,20 +30,23 @@ jobs:
       - name: Dependências de sistema (mpv + libmpv + ffmpeg)
         run: sudo apt-get update && sudo apt-get install -y mpv libmpv-dev ffmpeg
 
-      - name: Instalar o app (com dependências de dev)
-        run: pip install -e ".[dev]"
+      # `uv sync` instala o projeto em modo editable e a CPython exata da
+      # matriz; os passos seguintes usam caminhos explícitos no .venv (os
+      # mesmos comandos canônicos do desenvolvimento local).
+      - name: Instalar a partir do lockfile (uv sync --locked)
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
-        run: ruff check src/ tests/
+        run: .venv/bin/ruff check src/ tests/
 
       - name: Formatação (ruff format)
-        run: ruff format --check src/ tests/
+        run: .venv/bin/ruff format --check src/ tests/
 
       - name: Tipagem (mypy)
-        run: mypy src/
+        run: .venv/bin/python -m mypy src/
 
       - name: Testes (offline, com mocks)
-        run: python -m pytest tests/ -q
+        run: .venv/bin/python -m pytest tests/ -q
 
   seguranca:
     runs-on: ubuntu-latest
