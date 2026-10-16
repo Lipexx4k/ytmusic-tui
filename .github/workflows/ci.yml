@@ -19,7 +19,9 @@ jobs:
       # T07: o ambiente de teste vem do uv.lock (resolve universal que cobre
       # 3.11–3.13), não de ranges flutuantes. O `--locked` falha se o lockfile
       # estiver ausente ou fora de sincronia com o pyproject.toml.
-      - uses: astral-sh/setup-uv@v10
+      # Sem tag móvel "v10" (só versões exatas): pin explícito; o Dependabot
+      # (grupo actions) atualiza a versão.
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
 
@@ -62,7 +64,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      # Sem tag móvel "v10" (só versões exatas): pin explícito; o Dependabot
+      # (grupo actions) atualiza a versão.
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
 
