@@ -7,7 +7,6 @@ import threading
 from pathlib import Path
 from typing import Any, cast
 
-from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -54,6 +53,7 @@ from ytmusic_tui.tui.messages import (
     download_dir_set,
     download_format_set,
     download_quality_set,
+    escape_markup,
     search_error,
     volume_set,
 )
@@ -301,8 +301,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         if count is None and isinstance(album, AlbumDetail):
             count = len(album.tracks)
         parts = [part for part in (artist, year, f"{count} faixas" if count else "") if part]
-        suffix = f" — {escape(' · '.join(parts))}" if parts else ""
-        header.update(f"💿 [b]{escape(title)}[/b]{suffix}")
+        suffix = f" — {escape_markup(' · '.join(parts))}" if parts else ""
+        header.update(f"💿 [b]{escape_markup(title)}[/b]{suffix}")
 
     def _render_album_message(self, text: str) -> None:
         """Mostra (ou oculta, com texto vazio) a mensagem da aba de álbum."""
@@ -338,9 +338,10 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         try:
             details = await asyncio.to_thread(ytmusic.get_album, browse_id)
         except Exception as e:
-            # T12-R5: erro em 3 partes; escape(): o detalhe pode ter [colchetes].
+            # T12-R5: erro em 3 partes; escape_markup(): o detalhe pode ter
+            # [colchetes] que o parser de markup do Textual comeria (T12-R6).
             if epoch == self._album_epoch:
-                self._render_album_message(escape(album_error(str(e))))
+                self._render_album_message(escape_markup(album_error(str(e))))
             return
         self.display_album(details, epoch=epoch)
 
@@ -599,8 +600,9 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             if epoch != self._search_epoch:
                 logger.debug("Erro de busca obsoleto descartado (época %s)", epoch)
                 return
-            # T12-R5: erro em 3 partes; escape(): o detalhe pode ter [colchetes].
-            self._render_search_message(escape(search_error(str(e))))
+            # T12-R5: erro em 3 partes; escape_markup(): o detalhe pode ter
+            # [colchetes] que o parser de markup do Textual comeria (T12-R6).
+            self._render_search_message(escape_markup(search_error(str(e))))
 
     def _render_search_message(self, text: str) -> None:
         """Mostra uma mensagem no lugar dos resultados (in-place)."""

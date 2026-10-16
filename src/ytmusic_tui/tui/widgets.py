@@ -1,8 +1,9 @@
 """Widgets personalizados usados pelas telas da TUI."""
 
+import contextlib
 from typing import Any
 
-from rich.markup import escape
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBar, Static
@@ -10,7 +11,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBa
 from ytmusic_tui.api.models import Album, Track
 from ytmusic_tui.library.models import Track as LibraryTrack
 from ytmusic_tui.player import PlayerState, TrackInfo
-from ytmusic_tui.tui.messages import PLAYER_ERROR_TEXT, PLAYER_LOADING_TEXT
+from ytmusic_tui.tui.messages import PLAYER_ERROR_TEXT, PLAYER_LOADING_TEXT, escape_markup
 
 
 class AutoHighlightListView(ListView):
@@ -146,7 +147,7 @@ class NowPlayingBar(Static):
             ),
             Horizontal(
                 Static("0:00", id="np-time-current"),
-                ProgressBar(id="np-progress", show_eta=False),
+                ProgressBar(id="np-progress", show_percentage=False, show_eta=False),
                 Static("0:00", id="np-time-total"),
                 id="np-progress-container",
             ),
@@ -158,8 +159,22 @@ class NowPlayingBar(Static):
         """Atualiza faixa em reprodução."""
         self.current_track = track
         info = self.query_one("#np-info", Static)
-        # escape(): o título/artista vêm do YouTube e podem conter [colchetes].
-        info.update(f"[b]{escape(track.title)}[/b] — {escape(track.artist)}")
+        # escape_markup(): o título/artista vêm do YouTube e podem conter
+        # [colchetes] que o parser de markup do Textual comeria (T12-R6).
+        info.update(f"[b]{escape_markup(track.title)}[/b] — {escape_markup(track.artist)}")
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Adapta a barra ao tamanho do terminal (T12-R6).
+
+        A linha única (faixa + controles + progresso + volume) não cabe em
+        terminais estreitos: o volume sai primeiro (< 100 colunas) e, bem
+        estreito (< 68), sai também o bloco de progresso — faixa e botões
+        (o essencial de tocar/pausar) ficam sempre visíveis.
+        """
+        width = event.size.width
+        with contextlib.suppress(Exception):
+            self.query_one("#np-volume", Static).display = width >= 100
+            self.query_one("#np-progress-container", Horizontal).display = width >= 68
 
     def update_position(self, position: float, duration: float) -> None:
         """Atualiza posição da reprodução."""

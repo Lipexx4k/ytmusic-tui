@@ -4,13 +4,13 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-483%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-516%20passando-brightgreen)
 ![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **483 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **516 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -302,7 +302,7 @@ ou anexar a uma issue.
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 483 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 516 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -325,7 +325,7 @@ ytmusic-tui/
 │       ├── screens.py         # MainScreen: abas, atalhos e navegação
 │       ├── widgets.py         # Widgets personalizados (listas, barra do player)
 │       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
-└── tests/                     # 483 testes em camadas (L1 mocks + L2 local) + integração opt-in
+└── tests/                     # 516 testes em camadas (L1 mocks + L2 local) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento

@@ -117,24 +117,25 @@ Screen {
     margin: 0 1 1 1;
 }
 
-/* Now Playing Bar */
+/* Now Playing Bar (T12-R6: min-widths pequenos — a barra esconde os
+   acessórios em terminal estreito via NowPlayingBar.on_resize) */
 #np-container {
     height: 100%;
     align: center middle;
 }
 
 #np-info {
-    width: 40;
-    min-width: 30;
+    width: 1fr;
+    min-width: 12;
     content-align: left middle;
-    padding-right: 2;
+    padding-right: 1;
 }
 
 #np-controls {
     width: auto;
-    min-width: 30;
+    min-width: 0;
     content-align: center middle;
-    padding: 0 2;
+    padding: 0 1;
 }
 
 #np-controls Button {
@@ -143,16 +144,16 @@ Screen {
 }
 
 #np-progress-container {
-    width: 1fr;
-    min-width: 40;
+    width: 2fr;
+    min-width: 24;
     content-align: center middle;
-    padding: 0 2;
+    padding: 0 1;
 }
 
 #np-progress {
     width: 1fr;
-    min-width: 30;
-    margin: 0 2;
+    min-width: 10;
+    margin: 0 1;
 }
 
 #np-time-current, #np-time-total {
@@ -164,9 +165,9 @@ Screen {
 
 #np-volume {
     width: auto;
-    min-width: 10;
+    min-width: 5;
     content-align: right middle;
-    padding-right: 2;
+    padding-right: 1;
     color: $text-muted;
 }
 

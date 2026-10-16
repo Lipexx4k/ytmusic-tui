@@ -19,12 +19,33 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 - Encerramento do player é auditável (T11): fechar o app encerra o `yt-dlp`
   usado pelo hook do mpv (nenhum processo órfão ou zumbi) e eventos
   atrasados do player não alcançam uma interface já desmontada
+- Ajuda completa na tecla F1 (T12): o modal lista os **atalhos reais**
+  (extraídos dos bindings — sem cópia que desatualiza), com Esc para fechar,
+  e as teclas de download só disparam na aba certa
+- Estados de tela visíveis (T12): busca, biblioteca, álbum, player e
+  downloads mostram carregando/vazio/sem resultados/falha em vez de tela
+  ambígua — inclusive "carregando…" na barra de reprodução e uma dica de
+  como começar quando a fila de downloads está vazia
+- Descarte de download interrompido pede confirmação (T12): `d` pergunta
+  (y/Enter confirma, n/Esc cancela); onde nada é destruído, não pergunta
 
 ### Alterado
 
 - A URL de watch do YouTube Music (`music.youtube.com/watch?v=…`) passa a
   existir em um único módulo, com teste que falha se o literal reaparecer
   em qualquer outro arquivo (T11)
+- Mensagens de erro em 3 partes (T12): o que falhou, se os dados do usuário
+  estão preservados e a próxima ação — sem traceback e com detalhes
+  mascarados (§8.3)
+- Strings pt-BR da interface (avisos, erros, ajuda, dicas) em um ponto único
+  (`tui/messages.py`) (T12)
+- Configuração salva a cada alteração real, sem estado pendente (T12):
+  abrir a aba não regrava o arquivo nem avisa à toa; falha de escrita vira
+  aviso mascarado e nada mais se perde
+- Barra de reprodução se adapta ao terminal (T12): em telas estreitas o
+  volume e o progresso saem de cena e a faixa + botões continuam visíveis;
+  títulos com emoji/CJK/colchetes aparecem corretos (escape próprio de
+  markup — `[LIVE]` não some mais)
 
 ### Corrigido
 
@@ -32,6 +53,13 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   evento do mpv era comparado num formato que nunca casava (os campos
   chegam como bytes) — o avanço automático volta a funcionar e a falha de
   stream passa a virar erro na interface
+- Resposta antiga de busca/álbum não sobrescreve mais a mais recente (T12):
+  cada operação tem época de render
+- Sair com download em andamento agora aparece como `INTERRUPTED` na
+  próxima sessão (T12): a interface não fica mentindo "baixando" até a
+  próxima recarga
+- Leitura da biblioteca não congela mais a interface (T12): a consulta roda
+  fora do loop de eventos
 
 ## [0.1.3] - 2026-10-16
 

@@ -130,6 +130,17 @@ def format_error(what: str, *, preserved: str = NOTHING_LOST, next_action: str) 
     return f"{detail}\n{ERROR_PRESERVED_MARK} {preserved}\n{ERROR_NEXT_MARK} {next_action}"
 
 
+def escape_markup(text: str) -> str:
+    """Escapa ``[...]`` para o markup do Textual (``Content.from_markup``).
+
+    O parser do Textual **remove** tags que não conhece — ``[LIVE]`` sumiria
+    da tela. O ``rich.markup.escape`` não resolve sozinho: só escapa padrões
+    de tag do Rich e deixa ``[LIVE]`` passar (achado do T12-R6). Aqui todo
+    ``[`` vira ``\\[``; o ``]`` não precisa de escape.
+    """
+    return text.replace("[", "\\[")
+
+
 def search_error(
     detail: str, *, next_action: str = "Tente de novo em instantes ou mude o termo buscado."
 ) -> str:

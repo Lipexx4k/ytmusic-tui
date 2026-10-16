@@ -4,7 +4,6 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from rich.markup import escape
 from textual.widgets import Static
 from textual.worker import Worker
 
@@ -21,6 +20,7 @@ from ytmusic_tui.tui.messages import (
     LIKE_ADDED,
     LIKE_REMOVED,
     NO_TRACK_PLAYING,
+    escape_markup,
     library_unavailable,
     reconciliation_summary,
 )
@@ -124,7 +124,9 @@ class LibraryController:
         """Mostra o motivo exato da falha (nunca uma lista "vazia") + o log."""
         view.set_tracks([])
         view.display = False
-        message.update(library_unavailable(escape(reason), escape(str(log_file_path()))))
+        message.update(
+            library_unavailable(escape_markup(reason), escape_markup(str(log_file_path())))
+        )
         message.display = True
         self._toast(LIBRARY_UNAVAILABLE_TOAST)
 

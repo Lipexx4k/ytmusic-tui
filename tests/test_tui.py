@@ -2280,6 +2280,83 @@ async def test_config_nao_salva_no_mount_mas_salva_alteracao_real(monkeypatch):
         assert "~/.config" in toasts[0] and str(Path.home()) not in toasts[0]
 
 
+# ===== T12-R6: redimensionamento e Unicode =====
+
+
+@pytest.mark.parametrize("size", [(80, 24), (60, 20), (120, 40), (200, 50)])
+@pytest.mark.asyncio
+async def test_layout_utilizavel_em_varios_tamanhos(size):
+    """T12-R6: 80×24, 60×20, 120×40 e 200×50 sem estourar a tela.
+
+    "Utilizável" = áreas principais presentes e nenhum widget visível da
+    barra de reprodução fora dos limites do terminal (a barra é a candidata
+    natural a estouro: info + controles + progresso + volume numa linha).
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        width = size[0]
+
+        assert screen.query_one("#main-tabs", TabbedContent).display
+        assert screen.query_one("#search-input", Input).display
+
+        bar = screen.query_one("#now-playing", NowPlayingBar)
+        assert bar.display
+        for widget in bar.query("Static, Button, ProgressBar, Horizontal"):
+            if not widget.display:
+                continue
+            region = widget.region
+            assert region.x >= 0, f"#{widget.id} x={region.x} (tela {size})"
+            assert region.x + region.width <= width, (
+                f"#{widget.id} estourou: {region} (tela {size})"
+            )
+
+
+@pytest.mark.asyncio
+async def test_titulos_unicode_em_listas_barra_e_tabela(monkeypatch):
+    """T12-R6: emoji/CJK/[colchetes] não quebram listas, barra e tabela."""
+    exotic = "曲 名前 🎵 [LIVE] — テスト"
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        # Lista de resultados da busca
+        monkeypatch.setattr(
+            ytmusic,
+            "search_catalog",
+            lambda *a, **k: SearchResult(
+                tracks=(_song("v1", exotic, artist="アーティスト [BANDA]"),)
+            ),
+        )
+        await screen.perform_search("unicode")
+        await pilot.pause()
+
+        view = screen.query_one("#search-songs", SongListView)
+        assert [s.video_id for s in view.songs] == ["v1"]
+        label = str(view.children[0].query_one(Label).render())
+        assert "曲 名前" in label and "[BANDA]" in label
+
+        # Barra de reprodução
+        bar = screen.query_one("#now-playing", NowPlayingBar)
+        bar.update_track(TrackInfo(video_id="v1", title=exotic, artist="アーティスト [BANDA] 🎸"))
+        rendered = str(bar.query_one("#np-info", Static).render())
+        assert "曲 名前" in rendered and "[LIVE]" in rendered
+
+        # Tabela de downloads
+        task = DownloadTask(video_id="v1", title=exotic, id="t-uni")
+        task.transition_to(DownloadStatus.RUNNING)
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [task])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [task])
+        screen.update_downloads_table()
+        await pilot.pause()
+
+        table = screen.query_one("#downloads-table", DataTable)
+        assert table.row_count == 1
+        assert "曲 名前" in str(table.get_row_at(0))
+
+
 @pytest.mark.asyncio
 async def test_album_antigo_nao_pisa_no_mais_recente(monkeypatch):
     """T12-R2: a carga antiga de álbum concluindo depois não sobrepõe a nova."""
