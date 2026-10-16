@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 from ytmusicapi import YTMusic
 
+from ytmusic_tui.errors import InvalidResponseError
+
 # Filtros aceitos pelo ``YTMusic.search`` (o parâmetro é um Literal lá).
 SearchFilter = Literal[
     "songs",
@@ -37,6 +39,26 @@ class SearchResult:
     albums: list[dict[str, Any]]
     playlists: list[dict[str, Any]]
     videos: list[dict[str, Any]]
+
+
+def _ensure_result_list(raw: Any) -> list[dict[str, Any]]:
+    """Valida a forma da resposta de busca (T08 · §10.1).
+
+    ``ytmusicapi`` devolve listas de dicts; qualquer outra forma é resposta
+    fora do contrato — erro tipado com "esperado × recebido", em vez do
+    ``AttributeError`` genérico que a lista malformada causava antes (a UI
+    mostra ``str(e)``; nenhuma mudança lá).
+    """
+    if not isinstance(raw, list):
+        raise InvalidResponseError(
+            f"resposta inesperada da API: esperado lista, recebido {type(raw).__name__}"
+        )
+    for item in raw:
+        if not isinstance(item, dict):
+            raise InvalidResponseError(
+                f"resposta inesperada da API: esperado dict, recebido {type(item).__name__}"
+            )
+    return raw
 
 
 class YTMusicAPI:
@@ -116,8 +138,9 @@ class YTMusicAPI:
         with ThreadPoolExecutor(max_workers=2) as pool:
             tracks_future = pool.submit(client.search, query, filter="songs", limit=songs_limit)
             albums_future = pool.submit(client.search, query, filter="albums", limit=albums_limit)
-            songs = tracks_future.result()
-            albums = albums_future.result()
+            # T08 · §10.1: valida a forma das DUAS listas antes dos filtros.
+            songs = _ensure_result_list(tracks_future.result())
+            albums = _ensure_result_list(albums_future.result())
 
         tracks = [s for s in songs if s.get("resultType") == "song" and s.get("videoId")]
         albums = [a for a in albums if a.get("resultType") == "album" and a.get("browseId")]

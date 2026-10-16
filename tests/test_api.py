@@ -4,6 +4,7 @@ import pytest
 
 import ytmusic_tui.api as api_module
 from ytmusic_tui.api import SearchResult, YTMusicAPI
+from ytmusic_tui.errors import InvalidResponseError
 
 
 class _FakeYTMusic:
@@ -103,6 +104,49 @@ def test_methods_delegate_to_client(fake_ytmusic):
     results = api.search("coldplay", filter="songs", limit=3)
     assert results[0]["resultType"] == "song"
     assert results[0]["title"] == "songs-coldplay"
+
+
+def _client_factory(songs: object, albums: object):
+    """Cliente falso que devolve formas controladas por filtro (T08)."""
+
+    class _ShapedClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def search(self, query, filter=None, limit=None, ignore_spelling=False):
+            return {"songs": songs, "albums": albums}[filter]
+
+    return _ShapedClient
+
+
+def test_search_catalog_rejects_non_list_songs(monkeypatch):
+    """Músicas fora do contrato (dict) → InvalidResponseError (T08 · §10.1)."""
+    monkeypatch.setattr(api_module, "YTMusic", _client_factory({"videoId": "x"}, []))
+    api = YTMusicAPI()
+    assert api.initialize() is True
+
+    with pytest.raises(InvalidResponseError, match="esperado lista, recebido dict"):
+        api.search_catalog("q")
+
+
+def test_search_catalog_rejects_non_list_albums(monkeypatch):
+    """Álbuns fora do contrato (None) → InvalidResponseError (T08 · §10.1)."""
+    monkeypatch.setattr(api_module, "YTMusic", _client_factory([], None))
+    api = YTMusicAPI()
+    api.initialize()
+
+    with pytest.raises(InvalidResponseError, match="esperado lista, recebido NoneType"):
+        api.search_catalog("q")
+
+
+def test_search_catalog_rejects_non_dict_item(monkeypatch):
+    """Item não-dict na lista → InvalidResponseError (T08 · §10.1)."""
+    monkeypatch.setattr(api_module, "YTMusic", _client_factory([{"videoId": "ok"}, "lixo"], []))
+    api = YTMusicAPI()
+    api.initialize()
+
+    with pytest.raises(InvalidResponseError, match="esperado dict, recebido str"):
+        api.search_catalog("q")
 
 
 if __name__ == "__main__":
