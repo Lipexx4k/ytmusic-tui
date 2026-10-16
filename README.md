@@ -4,13 +4,13 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-516%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-541%20passando-brightgreen)
 ![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **516 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
+> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **541 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
 > Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
@@ -271,8 +271,43 @@ YTMUSIC_DOWNLOAD_DIR=/tmp/teste YTMUSIC_DATA_DIR=/tmp/teste ytmusic-tui
 *(Em macOS/Windows são usados os caminhos equivalentes do `platformdirs`.)*
 
 Erros internos (por exemplo, falha ao acessar o banco da biblioteca) aparecem
-na própria interface **e** são registrados no log acima — útil para investigar
-ou anexar a uma issue.
+na própria interface **e** no log do app — veja as duas seções abaixo antes
+de abrir uma issue.
+
+### Logs (`~/.local/state/ytmusic-tui/log/ytmusic-tui.log`)
+
+O log é **JSON Lines**: cada linha é um objeto JSON com campos fixos (`ts`,
+`level`, `component`, `operation_id`, `event`, `error_code`, `message` e, em
+erros, `detail` com o traceback). Eventos importantes — subida/parada do app
+(com as versões), download iniciado/concluído/falhou, retentativas da API,
+migrações do banco, erros de banco, quarentena e recuperação — têm `event` e
+`error_code` próprios, o que deixa o diagnóstico greppável:
+
+```bash
+jq -c 'select(.event != null)' ~/.local/state/ytmusic-tui/log/ytmusic-tui.log | tail
+```
+
+A privacidade é aplicada pelo próprio app ao gravar: o HOME vira `~`, URLs
+perdem query/token e cabeçalhos de credencial viram `[REDACTED]` — nada disso
+fica cru no arquivo. O log é 0600, com rotação de 1 MB × 3 backups (máximo de
+4 MB no total).
+
+### Diagnóstico (`ytmusic-tui doctor`)
+
+O comando `ytmusic-tui doctor` (ou `python -m ytmusic_tui doctor`) verifica o
+ambiente **sem abrir a interface e sem alterar nada**: versões (app, Python,
+ytmusicapi, yt-dlp), libmpv e binários `mpv`/`ffmpeg`, diretórios (existência,
+escrita, modo), banco da biblioteca em somente leitura (`integrity_check` +
+versão do esquema × app) e resíduos de manutenção (quarentena, backups, log).
+
+```bash
+ytmusic-tui doctor
+```
+
+A saída é mascarada (mesmas regras do log) e feita para colar numa issue —
+ainda assim, revise antes de compartilhar. Exit code `0` = nada essencial
+quebrado; `1` = algo essencial (libmpv ou dependência ausente, diretório sem
+escrita, banco ilegível/corrompido ou mais novo que o app).
 
 ## 🔧 Como funciona (por dentro)
 
@@ -302,7 +337,7 @@ ou anexar a uma issue.
 
 **Projeto jovem:**
 - Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 516 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
+- **~80% vibe-coded** (aviso no topo 🙂): os 541 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
 - Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
 
 ## 🗂️ Estrutura do projeto
@@ -325,7 +360,7 @@ ytmusic-tui/
 │       ├── screens.py         # MainScreen: abas, atalhos e navegação
 │       ├── widgets.py         # Widgets personalizados (listas, barra do player)
 │       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
-└── tests/                     # 516 testes em camadas (L1 mocks + L2 local) + integração opt-in
+└── tests/                     # 541 testes em camadas (L1 mocks + L2 local) + integração opt-in
 ```
 
 ## 🛠️ Desenvolvimento
