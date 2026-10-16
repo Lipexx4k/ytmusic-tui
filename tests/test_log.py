@@ -420,6 +420,60 @@ async def test_eventos_app_start_e_app_stop(monkeypatch, caplog):
     assert "ytmusicapi" in message and "yt-dlp" in message
 
 
+async def test_app_stop_e_o_ultimo_passo_do_unmount(monkeypatch, caplog):
+    """T13: o ``app_stop`` sai DEPOIS do teardown, nunca antes.
+
+    Entre o início do ``on_unmount`` e a guarda do ``player.shutdown()``
+    existe a janela do deadlock do T11 (thread do mpv presa em
+    ``call_from_thread`` × ``terminate()``). O ``app_stop`` carrega o
+    ``versions_summary()`` (~ms, ``importlib.metadata``): registrá-lo no topo
+    do unmount alargava a janela e a suíte travava na L2 do player. Este
+    teste trava a ordem que fecha o log só no fim.
+    """
+    from ytmusic_tui.tui import app as app_module
+    from ytmusic_tui.tui.app import YTMusicTUI
+
+    _neutralizar_reconciliacao(monkeypatch)
+
+    ordem: list[str] = []
+
+    def _espiao(objeto, metodo: str, nome: str) -> None:
+        original = getattr(objeto, metodo)
+
+        def registrado(*args, **kwargs):
+            ordem.append(nome)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(objeto, metodo, registrado)
+
+    _espiao(app_module.player, "shutdown", "player.shutdown")
+    _espiao(app_module.download_manager, "shutdown", "downloads.shutdown")
+    _espiao(app_module.db_manager, "close", "db.close")
+
+    class _Captura(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if getattr(record, "event", None) == "app_stop":
+                ordem.append("log:app_stop")
+
+    captura = _Captura()
+    logger = logging.getLogger("ytmusic_tui.tui.app")
+    logger.addHandler(captura)
+    try:
+        with caplog.at_level(logging.INFO, logger="ytmusic_tui.tui.app"):
+            app = YTMusicTUI()
+            async with app.run_test(size=(80, 24)):
+                pass
+    finally:
+        logger.removeHandler(captura)
+
+    assert ordem == [
+        "player.shutdown",
+        "downloads.shutdown",
+        "db.close",
+        "log:app_stop",
+    ]
+
+
 async def test_evento_db_open_failed(monkeypatch, caplog):
     """Falha ao preparar o banco vira evento com o erro tipado (T13 §13.1)."""
     from ytmusic_tui.library import db_manager

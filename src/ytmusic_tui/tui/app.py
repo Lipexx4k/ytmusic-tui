@@ -197,7 +197,6 @@ class YTMusicTUI(App):
 
     def on_unmount(self) -> None:
         """Limpeza ao sair."""
-        log_event("tui.app", "app_stop", versions_summary())
         if self._ui_timer:
             self._ui_timer.stop()
         # T11-R2: sai da lista antes de encerrar — um app desmontado não pode
@@ -207,6 +206,16 @@ class YTMusicTUI(App):
         player.shutdown()
         download_manager.shutdown()
         db_manager.close()
+        # T13 (§13.1): o "app_stop" fecha a sessão do log — e fica no FIM do
+        # unmount de propósito. Entre o início deste handler e o
+        # `player.shutdown()` (que ativa a guarda de eventos) existe a janela
+        # em que um evento atrasado do libmpv bloquearia a thread do mpv em
+        # `call_from_thread`, à espera do loop que só volta depois do
+        # `terminate()` juntá-la — deadlock (corrida pré-existente do T11,
+        # reproduzida na L2). `versions_summary()` leva ~6-23ms
+        # (importlib.metadata) e no topo da função alargava essa janela em
+        # ~1000x; depois do teardown não há janela para alargar.
+        log_event("tui.app", "app_stop", versions_summary())
 
 
 def main() -> None:
