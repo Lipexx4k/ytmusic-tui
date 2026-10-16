@@ -297,13 +297,13 @@ class UserSettings(Base):
 class DownloadTaskRecord(Base):
     """Espelho persistido das tarefas de download em voo/interrompidas (T04-R1).
 
-    Tabela **nova** (a criação via ``create_all`` não exige migração — o
-    versionamento de esquema entra no T05); nenhuma coluna é adicionada às
-    tabelas existentes. A verdade da biblioteca continua em ``tracks``:
-    aqui só vivem os campos necessários para (a) detectar na próxima
-    execução que um trabalho ficou pela metade e (b) localizar os
-    temporários da tarefa — ``download_dir`` + ``final_path`` permitem
-    derivar ``.tmp/<chave>.*`` e ``<final>.part`` (§5.3/T04).
+    Tabela **nova** no esquema atual: criada por ``create_all`` em banco
+    novo e pela migração v1 em banco anterior a ela (T05-R1); nenhuma
+    coluna é adicionada às tabelas existentes. A verdade da biblioteca
+    continua em ``tracks``: aqui só vivem os campos necessários para (a)
+    detectar na próxima execução que um trabalho ficou pela metade e (b)
+    localizar os temporários da tarefa — ``download_dir`` + ``final_path``
+    permitem derivar ``.tmp/<chave>.*`` e ``<final>.part`` (§5.3/T04).
 
     ``track_id`` é um inteiro solto (sem FK): a linha pode sobreviver a um
     intervalo em que a faixa ainda não existe (registro é o passo 7 do

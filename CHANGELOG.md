@@ -31,6 +31,16 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 - Temporários/`.part` de download aguardando decisão não são mais removidos
   pela limpeza de 24 h: com dono, a decisão (retomar/descartar) é do
   usuário; sem dono, a política de idade continua valendo
+- O banco da biblioteca agora tem migrações versionadas (T05): a versão do
+  esquema fica gravada no próprio banco e um banco criado por versões
+  anteriores é migrado sem perder dados; banco novo já nasce no esquema
+  atual, estampado — e esquema mais novo que o app vira erro claro, nunca
+  `create_all` silencioso
+- Backup automático do banco antes de qualquer migração (via `VACUUM INTO`,
+  nunca cópia de arquivo em uso): fica na pasta `backups/`, ao lado do
+  banco, com retenção dos 5 mais recentes — backup falhou, não migra
+- Diagnóstico de integridade do banco (`PRAGMA integrity_check`) disponível
+  por API para o futuro comando de diagnóstico (T13)
 
 ### Alterado
 
@@ -43,6 +53,10 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 - A tabela de downloads não duplica mais a linha da tarefa em execução
   (fila + ativos eram somados) e a linha selecionada é a referência das
   ações de retomar/descartar
+- Falhas do banco da biblioteca têm erros tipados (inacessível, sem
+  permissão, esquema incompatível, corrompido): a mensagem mostrada diz o
+  caso real e a inicialização do app nunca cria/derruba tabelas em
+  silêncio — e falha de banco não derruba o app
 
 ## [0.1.2] - 2026-10-15
 

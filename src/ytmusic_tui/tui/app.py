@@ -23,10 +23,13 @@ from textual.widgets import TabbedContent
 from ytmusic_tui.api import ytmusic
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.library import db_manager
+from ytmusic_tui.library.errors import LibraryError
 from ytmusic_tui.log import setup_logging
 from ytmusic_tui.player import PlayerEvent, PlayerState, TrackInfo, player
 from ytmusic_tui.tui.screens import MainScreen
 from ytmusic_tui.tui.widgets import NowPlayingBar
+
+logger = logging.getLogger(__name__)
 
 
 class YTMusicTUI(App):
@@ -42,6 +45,9 @@ class YTMusicTUI(App):
     def __init__(self) -> None:
         super().__init__()
         self._ui_timer: Timer | None = None
+        #: Erro tipado da abertura do banco (T05): a UI mostra a mensagem
+        #: específica do caso; falha de banco nunca derruba o app.
+        self.db_error: LibraryError | None = None
 
     def compose(self) -> ComposeResult:
         # Nada a compor: as telas são instaladas em on_mount. Retornar uma
@@ -51,13 +57,21 @@ class YTMusicTUI(App):
 
     def on_mount(self) -> None:
         """Inicialização após montagem."""
-        # Inicializar banco de dados
-        db_manager.create_all()
+        # Abrir o banco na versão do esquema (T05-R1/R2): banco novo nasce
+        # no esquema atual; legado ganha backup e migra; incompatível vira
+        # erro tipado — nunca create_all silencioso. Falha não derruba o
+        # app: a aba Biblioteca mostra o caso (T05-R4).
+        try:
+            db_manager.migrate()
+        except LibraryError as error:
+            self.db_error = error
+            logger.error("Falha ao preparar o banco da biblioteca: %s", error)
 
         # T04-R2: tarefas deixadas por uma execução anterior viram INTERRUPTED
         # e entram na fila, para a UI oferecer retomar (r) / descartar (d).
-        # Depois do create_all: a tabela do espelho precisa existir.
-        download_manager.recover_interrupted()
+        # Depois da migração: a tabela do espelho precisa existir.
+        if self.db_error is None:
+            download_manager.recover_interrupted()
 
         # Inicializar API (cliente anônimo; nenhum login necessário)
         ytmusic.initialize()

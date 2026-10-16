@@ -19,7 +19,9 @@ from textual.widgets import (
 from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
-from ytmusic_tui.library import library
+from ytmusic_tui.library import db_manager, library
+from ytmusic_tui.library.errors import SchemaIncompatibleError
+from ytmusic_tui.library.migrations import SCHEMA_VERSION
 from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui import download_controller, library_controller
@@ -518,7 +520,7 @@ async def test_download_album_queues_tracks_and_skips_downloaded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_app_mount_recovers_interrupted_downloads(monkeypatch):
-    """O on_mount do App chama a recuperação (T04-R2) depois do create_all."""
+    """O on_mount do App chama a recuperação (T04-R2) depois da migração."""
     calls: list[int] = []
     monkeypatch.setattr(download_manager, "recover_interrupted", lambda: calls.append(1) or 0)
 
@@ -527,6 +529,47 @@ async def test_app_mount_recovers_interrupted_downloads(monkeypatch):
         await pilot.pause()
 
     assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_startup_migrates_isolated_tmp_db():
+    """O on_mount migra um banco NOVO no caminho temporário, sem tocar o real.
+
+    Regressão do isolamento (T05): nenhum teste pode abrir/migrar o banco
+    real do usuário — a fixture global redireciona o ``db_manager`` para
+    ``tmp_path``; aqui o arquivo é apagado de propósito para provar que o
+    startup cria e estampa um banco novo do zero.
+    """
+    db_manager.close()
+    db_manager.db_path.unlink(missing_ok=True)  # banco novo de verdade
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+    assert db_manager.db_path != settings.library_db_path
+    assert db_manager.db_path.exists()
+    assert db_manager.schema_version() == SCHEMA_VERSION
+    assert app.db_error is None
+
+
+@pytest.mark.asyncio
+async def test_startup_schema_incompatible_does_not_crash(monkeypatch):
+    """Erro tipado na abertura do banco não derruba o app (T05-R4)."""
+
+    def _broken() -> None:
+        raise SchemaIncompatibleError("esquema v999 é mais novo que o app")
+
+    calls: list[int] = []
+    monkeypatch.setattr(db_manager, "migrate", _broken)
+    monkeypatch.setattr(download_manager, "recover_interrupted", lambda: calls.append(1) or 0)
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+    assert isinstance(app.db_error, SchemaIncompatibleError)
+    assert calls == []  # sem esquema aberto, não tenta recuperar tarefas
 
 
 @pytest.mark.asyncio

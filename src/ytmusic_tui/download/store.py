@@ -1,8 +1,8 @@
 """Persistência mínima das tarefas de download (T04-R1).
 
-Tabela própria (``download_tasks``) no mesmo SQLite da biblioteca, criada
-por ``create_all`` — tabela nova não exige migração (o versionamento de
-esquema entra no T05). A tabela é um **espelho de estado** das tarefas em
+Tabela própria (``download_tasks``) no mesmo SQLite da biblioteca: criada
+pelo esquema atual em banco novo e pela migração v1 em banco anterior a
+ela (T05-R1). A tabela é um **espelho de estado** das tarefas em
 voo: a verdade da biblioteca continua em ``tracks`` (nada é duplicado) e
 ``track_id`` é um inteiro solto, não uma FK.
 

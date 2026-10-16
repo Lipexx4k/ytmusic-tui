@@ -582,10 +582,10 @@ class DownloadManager:
     def recover_interrupted(self) -> int:
         """Recupera tarefas deixadas por uma execução anterior (T04-R2).
 
-        Chamado na inicialização, depois de ``create_all``: converte as
-        linhas em voo em ``INTERRUPTED`` (a partir daí a decisão é do
-        usuário) e **hidrata** cada linha de volta em um ``DownloadTask`` na
-        fila, para a UI listar e oferecer retomar (r) / descartar (d).
+        Chamado na inicialização, depois da migração do esquema (T05-R1):
+        converte as linhas em voo em ``INTERRUPTED`` (a partir daí a decisão
+        é do usuário) e **hidrata** cada linha de volta em um ``DownloadTask``
+        na fila, para a UI listar e oferecer retomar (r) / descartar (d).
 
         Hidratação, não transição: a máquina da T02 governa transições *em
         voo*; a linha persistida é o passado da tarefa — reconstruí-la já no
