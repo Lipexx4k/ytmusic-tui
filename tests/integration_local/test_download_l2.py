@@ -9,13 +9,24 @@ do kernel (/dev/full).
 """
 
 import asyncio
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from tests.integration_local._fakes import install_fake_ffmpeg
+import ytmusic_tui.download as download_mod
+from tests.integration_local._fakes import (
+    FakeDownloadError,
+    FakeUtils,
+    install_fake_ffmpeg,
+)
 from ytmusic_tui.download import DownloadStatus
+from ytmusic_tui.download.store import DownloadTaskStore
+from ytmusic_tui.player import TrackInfo
+from ytmusic_tui.tui.app import YTMusicTUI
 
 
 def _queue(env, video_id: str):
@@ -171,3 +182,94 @@ async def test_real_enospc_is_classified_and_publishes_nothing(tmp_path, monkeyp
     assert "No space left on device" in (result.error or "")
     assert not list(env.download_dir.rglob("*.mp3"))
     assert _temp_empty(env)
+
+
+@pytest.mark.asyncio
+async def test_quit_com_download_em_voo_fica_interrompido_na_proxima_sessao(
+    tmp_path, monkeypatch, make_l2_env
+):
+    """T12-R4: Ctrl+Q durante o download → INTERRUPTED na sessão seguinte.
+
+    Prova irmã da morte súbita (``test_process_death_l2``): aqui o
+    encerramento é GRACIOSO e a ordem real do Textual aparece — os workers
+    são cancelados **antes** do Unmount, então o gatilho é o cancelamento da
+    corrotina (INTERRUPTED + abort, restaurado no T12-R4); o ``shutdown`` do
+    on_unmount corre depois. A sessão seguinte é um **manager novo sobre o
+    mesmo banco**: exercita ``recover_interrupted`` do zero, como no próximo
+    start do app.
+    """
+    install_fake_ffmpeg(tmp_path, monkeypatch)
+    started = threading.Event()
+
+    class SlowYoutubeDL:
+        """Stub lento e cooperativo: dispara os hooks REAIS até o abort."""
+
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls):
+            template = self.opts["outtmpl"]
+            partial = Path(template.replace("%(ext)s", "webm.part"))
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            partial.write_bytes(b"parcial")
+            started.set()
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                for hook in self.opts.get("progress_hooks", []):
+                    hook({"status": "downloading", "_percent_str": "1.0%"})
+                time.sleep(0.02)
+            raise FakeDownloadError("stub não observou o abort (teste)")
+
+    monkeypatch.setattr(
+        download_mod,
+        "_load_yt_dlp",
+        lambda: SimpleNamespace(utils=FakeUtils, YoutubeDL=SlowYoutubeDL),
+    )
+
+    env = make_l2_env(mode=None)
+
+    # O app usa o singleton global: store e executor apontam para o ambiente
+    # isolado (mesmo padrão do e2e da suíte L1, que injeta executor vivo).
+    manager = download_mod.download_manager
+    monkeypatch.setattr(manager, "_store", env.store)
+    live_executor = ThreadPoolExecutor(max_workers=2)
+    monkeypatch.setattr(manager, "_executor", live_executor)
+
+    app = YTMusicTUI()
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            assert screen._enqueue_download(TrackInfo(video_id="vid-quit", title="Faixa longa"))
+            assert await asyncio.to_thread(started.wait, 10), "o worker real não chegou a baixar"
+            task = manager._active_downloads.get("vid-quit")
+            assert task is not None
+
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+
+        assert app.return_code == 0  # a saída não trava com o download em voo
+        # T12-R4: o cancelamento dos workers (que precede o Unmount) já marcou
+        # INTERRUPTED e acordou o abort; o thread cooperativo sai no próximo
+        # hook — a linha persistida espera a decisão da próxima sessão.
+        assert task.status is DownloadStatus.INTERRUPTED
+        assert task.abort_event.is_set()
+    finally:
+        live_executor.shutdown(wait=True, cancel_futures=True)
+
+    # Sessão seguinte: manager NOVO sobre o MESMO banco (caminho real).
+    fresh = download_mod.DownloadManager(store=DownloadTaskStore(db=env.db))
+    try:
+        assert fresh.recover_interrupted() == 1
+        interrupted = [
+            task for task in fresh.get_queue() if task.status is DownloadStatus.INTERRUPTED
+        ]
+        assert [task.video_id for task in interrupted] == ["vid-quit"]
+    finally:
+        fresh.shutdown()

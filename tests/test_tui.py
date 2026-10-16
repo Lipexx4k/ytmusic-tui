@@ -37,7 +37,7 @@ from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui import download_controller, library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
-from ytmusic_tui.tui.dialogs import HelpScreen
+from ytmusic_tui.tui.dialogs import ConfirmScreen, HelpScreen
 from ytmusic_tui.tui.messages import format_key
 from ytmusic_tui.tui.playback_controller import ensure_audio_file
 from ytmusic_tui.tui.widgets import (
@@ -731,7 +731,7 @@ async def test_action_retry_download_retries_selected_interrupted(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_action_discard_download_discards_selected_interrupted(monkeypatch):
-    """Tecla "d" na linha selecionada: descarta e resume os temporários removidos."""
+    """Tecla "d" na linha selecionada: confirmação e só então descarta (T12-R4)."""
     app = YTMusicTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -753,10 +753,144 @@ async def test_action_discard_download_discards_selected_interrupted(monkeypatch
 
         screen.update_downloads_table()
         screen.action_discard_download()
+        await pilot.pause()
 
+        assert isinstance(app.screen, ConfirmScreen)
+        assert discarded == []  # nada é removido antes do "sim"
+        assert not any("descartado" in t for t in toasts)
+
+        await pilot.press("y")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
         assert discarded == ["task-antiga"]
         assert any("descartado" in t for t in toasts)
         assert "1 temporário(s) removido(s)" in toasts[-1]
+
+
+@pytest.mark.parametrize("confirm_key", ["y", "enter"])
+@pytest.mark.asyncio
+async def test_tecla_d_abre_confirmacao_e_so_confirma_remove(monkeypatch, confirm_key):
+    """T12-R4: "d" passa por modal; y ou Enter confirmam o descarte.
+
+    Caminho real de tecla (check_action da aba 📥 + ação + modal): até o
+    "sim", nenhum temporário nem linha são removidos.
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        old = DownloadTask(
+            video_id="abc", title="Faixa", id="task-antiga", status=DownloadStatus.INTERRUPTED
+        )
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [old])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        discarded: list[str] = []
+        monkeypatch.setattr(
+            download_manager,
+            "discard_interrupted",
+            lambda task_id: discarded.append(task_id) or [],
+        )
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen._switch_tab("tab-downloads")
+        screen.update_downloads_table()
+        await pilot.pause()
+
+        await pilot.press("d")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ConfirmScreen)
+        confirm_text = str(app.screen.query_one("#confirm-message", Static).render())
+        assert "Descartar download" in confirm_text
+        assert "Faixa" in confirm_text
+        assert discarded == []
+
+        await pilot.press(confirm_key)
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert discarded == ["task-antiga"]
+        assert any("descartado" in t for t in toasts)
+
+
+@pytest.mark.parametrize("cancel_key", ["n", "escape"])
+@pytest.mark.asyncio
+async def test_descarte_cancelado_nao_remove_nada(monkeypatch, cancel_key):
+    """T12-R4: n ou Esc cancelam — o manager não é chamado e um toast avisa."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        old = DownloadTask(
+            video_id="abc", title="Faixa", id="task-antiga", status=DownloadStatus.INTERRUPTED
+        )
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [old])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        discarded: list[str] = []
+        monkeypatch.setattr(
+            download_manager,
+            "discard_interrupted",
+            lambda task_id: discarded.append(task_id) or [],
+        )
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen._switch_tab("tab-downloads")
+        screen.update_downloads_table()
+        await pilot.pause()
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+
+        await pilot.press(cancel_key)
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert discarded == []
+        assert any("cancelado" in t.lower() for t in toasts)
+
+
+@pytest.mark.asyncio
+async def test_retomar_nao_tem_confirmacao(monkeypatch):
+    """T12-R4: sem destruição não há modal — "r" retoma direto."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        old = DownloadTask(
+            video_id="abc", title="Faixa", id="task-antiga", status=DownloadStatus.INTERRUPTED
+        )
+        new = DownloadTask(video_id="abc", title="Faixa", id="task-nova", retry_of="task-antiga")
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [old])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        retried: list[str] = []
+        monkeypatch.setattr(
+            download_manager, "retry_interrupted", lambda task_id: retried.append(task_id) or new
+        )
+
+        async def _run(task):  # noqa: ANN001 - worker fake
+            return None
+
+        monkeypatch.setattr(screen, "_run_download", _run)
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen._switch_tab("tab-downloads")
+        screen.update_downloads_table()
+        await pilot.pause()
+
+        await pilot.press("r")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)  # nenhum modal no caminho
+        assert retried == ["task-antiga"]
+        assert any("Retomando" in t for t in toasts)
 
 
 @pytest.mark.asyncio

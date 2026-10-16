@@ -83,3 +83,20 @@ def help_shortcut_lines(bindings: Iterable[BindingType]) -> list[str]:
         suffix = f"  [dim]({note})[/dim]" if note else ""
         lines.append(f"  [b]{format_key(binding.key):<8}[/b] {binding.description}{suffix}")
     return lines
+
+
+# ===== Confirmação de descarte (T12-R4) =====
+
+CONFIRM_DISCARD_TITLE = "Descartar download"
+CONFIRM_DISCARD_HINT = "y/Enter confirma · n/Esc cancela"
+CONFIRM_DISCARD_CANCELLED = "Descarte cancelado"
+
+
+def confirm_discard_message(title: str) -> str:
+    """Texto do modal de descarte (tecla d) — o que será removido e o que não."""
+    return (
+        f"{CONFIRM_DISCARD_TITLE}: {title}\n\n"
+        "Os arquivos parciais desta tarefa serão removidos; o arquivo final já\n"
+        "publicado (se existir) e a biblioteca não são tocados.\n\n"
+        f"{CONFIRM_DISCARD_HINT}"
+    )

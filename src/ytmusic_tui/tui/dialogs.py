@@ -50,3 +50,34 @@ class HelpScreen(ModalScreen[None]):
         ]
         with Vertical(id="help-box"):
             yield Static("\n".join(lines), id="help-content", markup=True)
+
+
+class ConfirmScreen(ModalScreen[bool]):
+    """Confirmação modal de ação destrutiva (T12-R4).
+
+    Teclado primeiro: ``y``/Enter confirmam, ``n``/Esc cancelam. O resultado
+    sai por ``dismiss`` para o callback de ``push_screen`` — a ação
+    destrutiva só roda depois do "sim". Texto sem markup (título de faixa
+    pode conter ``[colchetes]``).
+    """
+
+    BINDINGS = [
+        Binding("y", "confirm", "Confirmar"),
+        Binding("enter", "confirm", "Confirmar"),
+        Binding("n", "cancel", "Cancelar"),
+        Binding("escape", "cancel", "Cancelar"),
+    ]
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Static(self._message, id="confirm-message", markup=False)
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)

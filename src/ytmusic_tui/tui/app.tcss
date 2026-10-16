@@ -308,6 +308,21 @@ HelpScreen {
     padding: 1 2;
 }
 
+/* Confirmação de ação destrutiva (T12-R4) */
+ConfirmScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#confirm-box {
+    width: 68;
+    max-width: 90%;
+    height: auto;
+    border: solid $warning;
+    background: $surface;
+    padding: 1 2;
+}
+
 /* Custom colors for dark theme */
 $background: #0d1117;
 $surface: #161b22;

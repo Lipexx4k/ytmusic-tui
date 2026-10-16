@@ -104,7 +104,7 @@ def make_l2_env(tmp_path, monkeypatch):
         store = DownloadTaskStore(db=db)
         manager = download_mod.DownloadManager(store=store)
         managers.append(manager)
-        return SimpleNamespace(manager=manager, store=store, download_dir=download_dir)
+        return SimpleNamespace(manager=manager, store=store, download_dir=download_dir, db=db)
 
     yield _make
     for manager in managers:

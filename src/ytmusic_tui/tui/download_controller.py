@@ -9,6 +9,8 @@ from ytmusic_tui.api.models import AlbumDetail
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.player import TrackInfo, player
+from ytmusic_tui.tui.dialogs import ConfirmScreen
+from ytmusic_tui.tui.messages import CONFIRM_DISCARD_CANCELLED, confirm_discard_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,6 +29,7 @@ class DownloadController:
     # isoladamente; as declarações abaixo existem só na checagem de tipos).
     _current_album: AlbumDetail | None
     if TYPE_CHECKING:
+        app: Any
 
         def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
         def run_worker(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -138,12 +141,24 @@ class DownloadController:
     def action_discard_download(self) -> None:
         """Descarta a tarefa INTERRUPTED selecionada (tecla "d", T04-R2).
 
-        Descarte explícito: limpa os temporários **da própria tarefa**
-        (logados) e a linha persistida. O arquivo final nunca é tocado.
+        Ação **destrutiva** (limpa os temporários da tarefa e a linha
+        persistida): desde o T12-R4 a tecla abre uma confirmação modal — o
+        "sim" chama ``_discard_download_confirmed``. Retomar (r) não apaga
+        nada e segue sem modal.
         """
         task = self._selected_download_task()
         if task is None or task.status is not DownloadStatus.INTERRUPTED:
             self._toast("Selecione um download interrompido (⏸️) na aba downloads para descartar")
+            return
+        self.app.push_screen(
+            ConfirmScreen(confirm_discard_message(task.title)),
+            lambda confirmed: self._discard_download_confirmed(task, confirmed),
+        )
+
+    def _discard_download_confirmed(self, task: DownloadTask, confirmed: bool | None) -> None:
+        """Callback do modal de descarte (T12-R4): só o "sim" remove algo."""
+        if not confirmed:
+            self._toast(CONFIRM_DISCARD_CANCELLED)
             return
         discarded = download_manager.discard_interrupted(task.id)
         if discarded is None:

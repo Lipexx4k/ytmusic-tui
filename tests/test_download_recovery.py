@@ -12,6 +12,9 @@ Cobrem os cenários do §6 que dependem do espelho persistido:
   removida; o arquivo final nunca é tocado;
 - encerramento gracioso (shutdown) persiste INTERRUPTED; a próxima sessão
   oferece a decisão;
+- cancelamento da corrotina do worker (ordem real do Textual ao fechar o
+  app: ``cancel_all`` antes do Unmount) também marca INTERRUPTED e acorda o
+  abort (T12-R4);
 - falha de escrita no SQLite é tolerada e logada (nunca quebra o download).
 """
 
@@ -342,6 +345,64 @@ async def test_shutdown_persists_interrupted_and_next_session_discards(
     assert not sobra.exists()
     assert manager2.get_queue() == []
     assert store.find(task.id) is None
+
+
+# ===== Cenário 8: cancelamento do worker na saída do app (T12-R4) =====
+
+
+@pytest.mark.asyncio
+async def test_cancellation_of_worker_marks_interrupted_like_shutdown(manager, store, monkeypatch):
+    """T12-R4: cancelar a corrotina (Textual: cancel_all antes do Unmount).
+
+    Ordem real do fechamento do app: o ``shutdown`` do ``on_unmount`` roda
+    depois do cancelamento e encontraria ``_active_downloads`` vazio — sem
+    este caminho o thread seguiria baixando e a linha só viraria INTERRUPTED
+    na sessão seguinte. Aqui: INTERRUPTED na hora, abort observado pelo
+    thread real, linha persistida.
+    """
+    abort_seen = threading.Event()
+
+    class _AbortAwareYoutubeDL:
+        """Stub lento que registra a saída pelo abort (hook levanta)."""
+
+        def __init__(self, opts: dict):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls: list[str]) -> None:
+            try:
+                while True:  # só sai quando o abort_event levanta o hook
+                    for hook in self.opts["progress_hooks"]:
+                        hook({"status": "downloading", "_percent_str": "50%"})
+                    time.sleep(0.01)
+            except RuntimeError:
+                abort_seen.set()
+                raise
+
+    monkeypatch.setattr(download_mod, "_load_yt_dlp", lambda: _fake_ytdlp(_AbortAwareYoutubeDL))
+
+    task = manager.queue_download(video_id="abc", title="T", artist="A", album="Alb")
+    runner = asyncio.create_task(manager.download(task))
+    await _wait_until(lambda: task.status is DownloadStatus.RUNNING)
+
+    runner.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await runner
+
+    assert task.status is DownloadStatus.INTERRUPTED
+    assert task.abort_event.is_set()
+    row = store.find(task.id)
+    assert row is not None and row.status == DownloadStatus.INTERRUPTED.value
+
+    # Thread real: observar o abort no próximo progress_hook (e sair sem
+    # sobrescrever o estado, T02-R3) — a latência de saída documentada.
+    await _wait_until(abort_seen.is_set)
+    assert task.status is DownloadStatus.INTERRUPTED
 
 
 # ===== Cenário 6: falha de escrita no SQLite =====

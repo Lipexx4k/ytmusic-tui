@@ -559,6 +559,15 @@ class DownloadManager:
 
         try:
             return await future
+        except asyncio.CancelledError:
+            # O cancelamento da corrotina é o gatilho real de "encerramento no
+            # meio do trabalho" (T12-R4): o Textual cancela os workers ao sair
+            # e só depois dispara o Unmount — o ``shutdown`` do on_unmount
+            # chega tarde e veria ``_active_downloads`` vazio. Marcar aqui
+            # (INTERRUPTED + abort + linha persistida) restaura o contrato do
+            # T02-R4 em qualquer ordem e acorda o thread do executor.
+            self._mark_interrupted(task)
+            raise
         finally:
             self._active_downloads.pop(task.video_id, None)
             # Terminais da sessão não deixam linha: o resultado vive na
@@ -847,6 +856,23 @@ class DownloadManager:
         )
         return discarded
 
+    def _mark_interrupted(self, task: DownloadTask) -> None:
+        """Fim no meio do trabalho: INTERRUPTED + abort + linha persistida.
+
+        Idempotente (T02-R4): tarefa já terminal não é tocada — corridas com
+        ``shutdown``/cancelamento preservam o estado final existente. Usado
+        pelo ``shutdown`` e pelo cancelamento da corrotina de ``download``
+        (T12-R4, ordem real do Textual ao fechar o app).
+        """
+        if task.is_terminal:
+            return
+        task.abort_event.set()
+        if task.can_transition_to(DownloadStatus.INTERRUPTED):
+            task.transition_to(DownloadStatus.INTERRUPTED)
+            # A linha fica: é ela que a próxima execução vai listar como
+            # "aguardando decisão" (T04-R2) — nunca limpar aqui.
+            self._persist_status(task)
+
     def shutdown(self) -> None:
         """Encerra o gerenciador sem bloquear a saída do app (T02-R4).
 
@@ -857,12 +883,7 @@ class DownloadManager:
         cancelamento: o próximo ``progress_hook``).
         """
         for task in self._active_downloads.values():
-            task.abort_event.set()
-            if task.can_transition_to(DownloadStatus.INTERRUPTED):
-                task.transition_to(DownloadStatus.INTERRUPTED)
-                # A linha fica: é ela que a próxima execução vai listar como
-                # "aguardando decisão" (T04-R2) — nunca limpar aqui.
-                self._persist_status(task)
+            self._mark_interrupted(task)
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 
