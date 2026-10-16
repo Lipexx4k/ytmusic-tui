@@ -436,7 +436,12 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             settings.update_and_save(auto_play_next=event.value)
 
     def _apply_text_setting(self, input_id: str, raw_value: str) -> None:
-        """Aplica campos de texto da aba Config (Enter para confirmar)."""
+        """Aplica campos de texto da aba Config (Enter para confirmar).
+
+        T12-R3 (inventário): ``settings.update_and_save`` grava um TOML
+        pequeno e só em ação explícita do usuário — segue síncrono; o
+        OSError já vira toast mascarado (§8.3).
+        """
         value = raw_value.strip()
         try:
             if input_id == "setting-volume":

@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Any
 
 from textual.widgets import DataTable
+from textual.worker import Worker
 
 from ytmusic_tui.api.models import AlbumDetail
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
@@ -30,7 +31,7 @@ class DownloadController:
         def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
         def run_worker(self, *args: Any, **kwargs: Any) -> Any: ...
         def _toast(self, message: str) -> None: ...
-        def refresh_library(self) -> None: ...
+        def refresh_library(self) -> Worker[None]: ...
 
         _track_info_from_song: Callable[..., Any]
 
@@ -54,7 +55,12 @@ class DownloadController:
         return rows
 
     def update_downloads_table(self) -> None:
-        """Atualiza tabela de downloads."""
+        """Atualiza tabela de downloads.
+
+        T12-R3 (inventário): fila/ativos são listas **em memória** (cópias,
+        sem I/O); o custo é montar as linhas do ``DataTable`` — pequeno e
+        limitado. Segue no loop de propósito (timer de 0,5 s + eventos).
+        """
         try:
             table = self.query_one("#downloads-table", DataTable)
         except Exception:
@@ -175,6 +181,10 @@ class DownloadController:
 
         Faixas já baixadas (na biblioteca local) são puladas; um único toast
         resume o resultado em vez de um por faixa.
+
+        T12-R3 (inventário): as consultas de ``library``/``ensure_track`` por
+        faixa são SQLite local, limitadas ao tamanho do álbum (unidades de
+        ms no total) — seguem no loop; o download em si roda em worker.
         """
         tracks = [track for track in album.tracks if track.video_id and track.is_available]
         if not tracks:

@@ -32,6 +32,7 @@ async def test_inaccessible_sqlite_shows_error_not_empty_library(tmp_path, monke
         # Erro tipado na abertura (T05) — o app não morre.
         assert isinstance(app.db_error, DatabaseInaccessibleError)
 
+        await screen.refresh_library().wait()
         message = screen.query_one("#library-message", Static)
         assert message.display is True
         rendered = str(message.render())

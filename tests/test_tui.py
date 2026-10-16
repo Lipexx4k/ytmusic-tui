@@ -893,8 +893,8 @@ async def test_library_refresh_twice_with_tracks(monkeypatch):
 
         screen.refresh_library()
         await pilot.pause()
-        screen.refresh_library()
-        await pilot.pause()
+        await screen.refresh_library().wait()
+        await pilot.pause()  # deixa o DOM assentar (clear/append são mensagens)
 
         view = screen.query_one("#library-list", TrackListView)
         assert len(view.children) == 2
@@ -916,9 +916,9 @@ async def test_library_load_error_is_shown_not_empty(monkeypatch, caplog):
     monkeypatch.setattr(library, "get_recent_tracks", _broken)
     app = YTMusicTUI()
     with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
+        async with app.run_test(size=(120, 40)):
             screen = app.screen
+            await screen.refresh_library().wait()
             message = screen.query_one("#library-message", Static)
 
             assert message.display is True
@@ -959,15 +959,14 @@ async def test_library_recovers_after_load_error(monkeypatch, caplog):
     monkeypatch.setattr(library, "get_recent_tracks", _flaky_tracks)
     app = YTMusicTUI()
     with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
+        async with app.run_test(size=(120, 40)):
             screen = app.screen
+            await screen.refresh_library().wait()
             message = screen.query_one("#library-message", Static)
             assert "Não foi possível carregar" in str(message.render())
 
             flaky["fail"] = False
-            screen.refresh_library()
-            await pilot.pause()
+            await screen.refresh_library().wait()
 
             assert "Nenhuma faixa na biblioteca local ainda" in str(message.render())
             assert message.display is False
@@ -986,9 +985,9 @@ async def test_library_shows_specific_message_for_typed_error(monkeypatch, caplo
     monkeypatch.setattr(library, "get_recent_tracks", _corrupt)
     app = YTMusicTUI()
     with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
+        async with app.run_test(size=(120, 40)):
             screen = app.screen
+            await screen.refresh_library().wait()
             message = screen.query_one("#library-message", Static)
 
             assert message.display is True
@@ -1885,6 +1884,102 @@ async def test_erro_de_carga_antiga_de_album_nao_apaga_o_novo(monkeypatch):
         assert "Erro ao carregar álbum" not in str(message.render())
         current = screen._current_album
         assert current is not None and current.browse_id == "MPREb-rapido"
+
+
+@pytest.mark.asyncio
+async def test_ui_responsiva_com_leitura_da_biblioteca_travada(monkeypatch):
+    """T12-R3: leitura do banco pendurada não bloqueia o loop nem as teclas.
+
+    A leitura fica presa num evento (thread real, via ``to_thread``); com
+    ela pendurada a UI precisa continuar processando teclas e exibir o
+    estado "carregando" — depois de destravada, volta ao estado vazio.
+    """
+    release = threading.Event()
+
+    def _slow_tracks(limit=500):
+        release.wait(timeout=10)
+        return []
+
+    monkeypatch.setattr(library, "get_recent_tracks", _slow_tracks)
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        tabs = screen.query_one("#main-tabs", TabbedContent)
+
+        # Teclas continuam funcionando com a leitura pendurada
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert tabs.active == "tab-search"
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert tabs.active == "tab-library"
+
+        message = screen.query_one("#library-message", Static)
+        assert message.display is True
+        assert library_controller.LIBRARY_LOADING_TEXT in str(message.render())
+
+        release.set()
+        await screen.refresh_library().wait()
+
+        assert "Nenhuma faixa na biblioteca local ainda" in str(message.render())
+
+
+@pytest.mark.asyncio
+async def test_leitura_antiga_da_biblioteca_nao_pisa_na_mais_nova(monkeypatch):
+    """T12-R2/R3: leitura antiga concluindo depois não sobrepõe a mais nova."""
+    release = threading.Event()
+    entered = threading.Event()
+    stale = {"blocked": False}
+
+    class _Track:
+        def __init__(self, title: str) -> None:
+            self.id = 1
+            self.source_id = "vid1"
+            self.title = title
+            self.artist_names = ["Artista"]
+            self.is_downloaded = False
+            self.local_path = None
+            self.album = None
+
+    def _tracks(limit=500):
+        if stale["blocked"]:
+            entered.set()
+            release.wait(timeout=10)
+            return [_Track("Antiga")]
+        return [_Track("Nova")]
+
+    monkeypatch.setattr(library, "get_recent_tracks", _tracks)
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        await screen.refresh_library().wait()  # estado estável antes do teste
+
+        captured: list = []
+        monkeypatch.setattr(screen, "run_worker", lambda worker, **kwargs: captured.append(worker))
+
+        # A leitura "antiga" fica presa DE VERDADE na thread antes de a nova rodar.
+        stale["blocked"] = True
+        screen.refresh_library()  # época N (antiga — fica presa)
+        task_old = asyncio.create_task(captured[0])
+        assert await asyncio.to_thread(entered.wait, 10)
+
+        stale["blocked"] = False
+        screen.refresh_library()  # época N+1 (nova)
+        await captured[1]  # a nova pinta primeiro
+        await pilot.pause()
+
+        view = screen.query_one("#library-list", TrackListView)
+        assert [track.title for track in view.tracks] == ["Nova"]
+
+        release.set()
+        await asyncio.wait_for(task_old, timeout=10)
+        await pilot.pause()
+
+        assert [track.title for track in view.tracks] == ["Nova"]
 
 
 if __name__ == "__main__":

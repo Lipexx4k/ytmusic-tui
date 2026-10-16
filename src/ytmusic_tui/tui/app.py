@@ -62,6 +62,9 @@ class YTMusicTUI(App):
         # no esquema atual; legado ganha backup e migra; incompatível vira
         # erro tipado — nunca create_all silencioso. Falha não derruba o
         # app: a aba Biblioteca mostra o caso (T05-R4).
+        # T12-R3 (inventário): migração/recuperação ficam no loop de
+        # propósito — são uma vez por sessão e precisam terminar antes de
+        # qualquer operação de banco (mover criaria janela de corrida).
         try:
             db_manager.migrate()
         except LibraryError as error:
