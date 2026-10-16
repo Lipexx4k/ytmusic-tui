@@ -32,6 +32,7 @@ from ytmusic_tui.config import MAX_DOWNLOAD_CONCURRENT, MIN_DOWNLOAD_CONCURRENT,
 from ytmusic_tui.diagnostics import mask_diagnostics
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.player import TrackInfo, player
+from ytmusic_tui.tui.dialogs import HelpScreen
 from ytmusic_tui.tui.download_controller import DownloadController
 from ytmusic_tui.tui.library_controller import LIBRARY_EMPTY_TEXT, LibraryController
 from ytmusic_tui.tui.playback_controller import PlaybackController
@@ -343,13 +344,24 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._switch_tab("tab-library")
         self.refresh_library()
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Disponibilidade de ações por tela (T12-R1).
+
+        ``r`` (retomar) e ``d`` (descartar) só existem na aba 📥 Downloads:
+        fora dela o atalho fica inativo — uma letra digitada em outro
+        contexto não dispara comando de download (nem toast fora de hora).
+        """
+        if action in ("retry_download", "discard_download"):
+            try:
+                tabs = self.query_one("#main-tabs", TabbedContent)
+            except Exception:
+                return False
+            return bool(tabs.active == "tab-downloads")
+        return True
+
     def action_help(self) -> None:
-        """Mostra os atalhos de teclado."""
-        self._toast(
-            "Ctrl+S buscar · Enter tocar/abrir álbum · Espaço play/pause · ←/→ anterior/próxima · "
-            "Ctrl+D baixar faixa · a baixar álbum · Esc voltar · L curtir · Ctrl+L biblioteca · "
-            "F1 ajuda · Ctrl+Q sair"
-        )
+        """Abre a ajuda modal montada dos atalhos reais (T12-R1)."""
+        self.app.push_screen(HelpScreen([*self.app.BINDINGS, *self.BINDINGS]))
 
     def action_back_to_search(self) -> None:
         """Esc na aba de álbum volta para a busca (pronto para digitar)."""

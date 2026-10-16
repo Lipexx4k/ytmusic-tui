@@ -291,6 +291,23 @@ Button:disabled {
     opacity: 0.5;
 }
 
+/* Ajuda modal (T12-R1): centralizada, rola em terminais baixos */
+HelpScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#help-box {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    max-height: 90%;
+    overflow-y: auto;
+    border: solid $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
 /* Custom colors for dark theme */
 $background: #0d1117;
 $surface: #161b22;

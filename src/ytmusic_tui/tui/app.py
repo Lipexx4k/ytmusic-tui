@@ -26,6 +26,7 @@ from ytmusic_tui.library import db_manager
 from ytmusic_tui.library.errors import LibraryError
 from ytmusic_tui.log import setup_logging
 from ytmusic_tui.player import PlayerEvent, PlayerState, TrackInfo, player
+from ytmusic_tui.tui.dialogs import HelpScreen
 from ytmusic_tui.tui.screens import MainScreen
 from ytmusic_tui.tui.widgets import NowPlayingBar
 
@@ -85,6 +86,15 @@ class YTMusicTUI(App):
 
         # Instalar a tela principal
         self.push_screen(MainScreen())
+
+    def action_help(self) -> None:
+        """Ajuda via ``App.BINDINGS`` (T12-R1): a MainScreen também a define.
+
+        O binding ``f1`` do app só é alcançado quando nenhuma tela com o
+        próprio ``f1`` está no topo (ex.: outra modal aberta); garantir a
+        action aqui evita "atalho anunciado sem ação".
+        """
+        self.push_screen(HelpScreen([*self.BINDINGS, *MainScreen.BINDINGS]))
 
     def _on_player_event(self, event: PlayerEvent) -> None:
         """Callback de eventos do player (pode vir da thread do libmpv)."""

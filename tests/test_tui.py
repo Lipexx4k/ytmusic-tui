@@ -36,6 +36,8 @@ from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui import download_controller, library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
+from ytmusic_tui.tui.dialogs import HelpScreen
+from ytmusic_tui.tui.messages import format_key
 from ytmusic_tui.tui.playback_controller import ensure_audio_file
 from ytmusic_tui.tui.widgets import (
     AlbumListView,
@@ -1003,9 +1005,22 @@ async def test_library_shows_specific_message_for_typed_error(monkeypatch, caplo
 
 def test_bindings_resolve_to_actions():
     """Todo atalho anunciado deve ter uma action correspondente."""
-    for binding in MainScreen.BINDINGS:
-        action = f"action_{binding.action}"
-        assert hasattr(MainScreen, action) or hasattr(YTMusicTUI, action), binding.key
+    for owner in (MainScreen, YTMusicTUI, HelpScreen):
+        for binding in owner.BINDINGS:
+            action = f"action_{binding.action}"
+            assert (
+                hasattr(owner, action) or hasattr(MainScreen, action) or hasattr(YTMusicTUI, action)
+            ), f"{owner.__name__}:{binding.key}"
+
+
+def test_format_key_traduz_teclas_para_ajuda():
+    """A ajuda exibe teclas legíveis, não a nomenclatura interna do Textual."""
+    assert format_key("ctrl+q") == "Ctrl+Q"
+    assert format_key("space") == "Espaço"
+    assert format_key("left") == "←"
+    assert format_key("right") == "→"
+    assert format_key("f1") == "F1"
+    assert format_key("l") == "L"
 
 
 @pytest.mark.asyncio
@@ -1561,6 +1576,170 @@ async def test_mpv_indisponivel_vira_toast_sem_traceback(monkeypatch):
         assert "mpv indisponível" in toasts[0]
         bar = screen.query_one("#now-playing", NowPlayingBar)
         assert "falha" in str(bar.query_one("#np-info", Static).render())
+
+
+@pytest.mark.asyncio
+async def test_help_modal_lista_atalhos_reais_e_fecha_com_esc():
+    """T12-R1: F1 abre ajuda modal montada dos bindings; Esc fecha.
+
+    A fonte da lista é ``App.BINDINGS + MainScreen.BINDINGS`` — nenhuma
+    cópia própria para ficar desatualizada (era o toast com texto fixo).
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f1")
+        await pilot.pause()
+
+        help_screen = app.screen
+        assert isinstance(help_screen, HelpScreen)
+        content = str(help_screen.query_one("#help-content", Static).render())
+        for binding in [*YTMusicTUI.BINDINGS, *MainScreen.BINDINGS]:
+            assert format_key(binding.key) in content, binding.key
+        # Navegação básica documentada (R1) e sem duplicar tecla na lista
+        for token in ("↑/↓", "Tab", "Enter", "Esc"):
+            assert token in content, token
+        assert content.count("Ctrl+Q") == 1
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, MainScreen)
+
+
+@pytest.mark.asyncio
+async def test_f1_tambem_fecha_a_ajuda():
+    """F1 alterna a ajuda (Esc e F1 fecham a modal)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, MainScreen)
+
+
+@pytest.mark.asyncio
+async def test_digitar_na_busca_nao_dispara_atalho_global(monkeypatch):
+    """T12-R1: letras/espaço no campo de busca digitam — nunca disparam ação.
+
+    ``a``, ``l``, ``d``, ``r`` e ``space`` são atalhos GLOBAIS da tela; o
+    foco no ``Input`` precisa consumi-los como texto (era o risco de buscar
+    "adele" e baixar um álbum no meio da digitação).
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        paused: list[bool] = []
+        monkeypatch.setattr(player, "toggle_pause", lambda: paused.append(True))
+
+        search = screen.query_one("#search-input", Input)
+        search.focus()
+        await pilot.pause()
+        await pilot.press("a", "l", "d", "r", "space")
+        await pilot.pause()
+
+        assert search.value == "aldr "
+        assert toasts == []
+        assert paused == []
+
+        # Ctrl+L continua sendo atalho (tecla com modificador) e não mexe
+        # no texto digitado.
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert screen.query_one("#main-tabs", TabbedContent).active == "tab-library"
+        assert search.value == "aldr "
+
+
+@pytest.mark.asyncio
+async def test_r_e_d_so_valem_na_aba_downloads(monkeypatch):
+    """T12-R1: r/d restritos à aba 📥 Downloads via ``check_action``.
+
+    Fora da aba o atalho fica inativo (nem toast, nem manager); dentro
+    dela o comportamento de sempre continua (orientar sem seleção válida).
+    """
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        calls: list[str] = []
+        monkeypatch.setattr(
+            download_manager, "retry_interrupted", lambda task_id: calls.append(task_id)
+        )
+        monkeypatch.setattr(
+            download_manager, "discard_interrupted", lambda task_id: calls.append(task_id)
+        )
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+
+        screen._switch_tab("tab-search")
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.press("d")
+        await pilot.pause()
+        assert toasts == []
+        assert calls == []
+
+        screen._switch_tab("tab-downloads")
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.press("d")
+        await pilot.pause()
+        assert sum("Selecione um download interrompido" in t for t in toasts) == 2
+        assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_navegacao_completa_sem_mouse(monkeypatch):
+    """T12-R1: buscar → tocar → biblioteca → sair, só com teclado."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        tabs = screen.query_one("#main-tabs", TabbedContent)
+
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        search = screen.query_one("#search-input", Input)
+        assert search.has_focus
+
+        monkeypatch.setattr(
+            ytmusic,
+            "search_catalog",
+            lambda *args, **kwargs: SearchResult(tracks=(_song("v1", "Faixa teclado"),)),
+        )
+        for key in "abc":
+            await pilot.press(key)
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+
+        songs = screen.query_one("#search-songs", SongListView)
+        assert len(songs.songs) == 1
+
+        played: list[TrackInfo] = []
+        monkeypatch.setattr(player, "play", lambda info: played.append(info) or True)
+        await pilot.press("tab")
+        await pilot.pause()
+        assert songs.has_focus
+        await pilot.press("enter")
+        await pilot.pause()
+        assert [info.video_id for info in played] == ["v1"]
+
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert tabs.active == "tab-library"
+
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+    assert app.return_code == 0
 
 
 if __name__ == "__main__":
