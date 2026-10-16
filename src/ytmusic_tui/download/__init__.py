@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shutil
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -56,6 +57,18 @@ logger = logging.getLogger(__name__)
 # Carregamos sob demanda e guardamos o módulo para reuso/testes.
 _yt_dlp_module: Any | None = None
 
+#: Limites de rede do yt-dlp (§8.2/T06 · R2): sem eles, socket morto ou
+#: resposta que estola deixam o worker preso por tempo indeterminado. Pior
+#: caso de estol ≈ ``socket_timeout × (retries + 1)``. São decisão de código
+#: (constantes documentadas), não configuração de usuário.
+YDL_SOCKET_TIMEOUT = 30
+YDL_RETRIES = 3
+YDL_FRAGMENT_RETRIES = 3
+
+#: URL de watch do YouTube Music; constante (em vez de f-string inline) para
+#: os testes de ponta a ponta apontarem para um servidor local (§8.4).
+WATCH_URL = "https://music.youtube.com/watch?v={video_id}"
+
 
 def _load_yt_dlp() -> Any:
     """Importa (uma única vez) e devolve o módulo yt_dlp."""
@@ -65,6 +78,29 @@ def _load_yt_dlp() -> Any:
 
         _yt_dlp_module = yt_dlp
     return _yt_dlp_module
+
+
+def _which_ffmpeg() -> str | None:
+    """Localiza o ffmpeg no PATH (seam: a suíte não depende do host)."""
+    return shutil.which("ffmpeg")
+
+
+def _missing_dependency() -> str | None:
+    """Mensagem da primeira dependência ausente, ou ``None`` (§8.4/T06).
+
+    O yt-dlp é importado tarde (recurso do T01) e pode não estar instalado;
+    o ffmpeg é exigido pelos post-processadores (``FFmpegExtractAudio`` e
+    ``EmbedThumbnail``) e é procurado no PATH, como o próprio yt-dlp faz.
+    A checagem roda ANTES de reservar: dependência ausente vira erro claro
+    na tarefa — nunca crash no meio do download nem temporário órfão.
+    """
+    try:
+        _load_yt_dlp()
+    except ImportError as e:
+        return f"yt-dlp não está instalado ({e}); instale com: pip install yt-dlp"
+    if _which_ffmpeg() is None:
+        return "ffmpeg não encontrado no PATH — necessário para converter/etiquetar o áudio"
+    return None
 
 
 class DownloadManager:
@@ -144,6 +180,11 @@ class DownloadManager:
             "noprogress": True,  # sem isso, o progresso é impresso e corrompe a TUI
             "ignoreerrors": False,
             "extract_flat": False,
+            # R2 (§8.2/T06): limites reais de rede — socket que estola não
+            # prende o worker para sempre (pior caso ≈ timeout × retries).
+            "socket_timeout": YDL_SOCKET_TIMEOUT,
+            "retries": YDL_RETRIES,
+            "fragment_retries": YDL_FRAGMENT_RETRIES,
             "writethumbnail": settings.embed_metadata,
             "postprocessors": [],
             "progress_hooks": [lambda d: self._progress_hook(task, d)],
@@ -357,6 +398,14 @@ class DownloadManager:
             self._persist_status(task)
             return self._adopt_existing_file(task, final_path)
 
+        # §8.4/T06: dependências ausentes (yt-dlp/ffmpeg) → erro claro ANTES
+        # de reservar; nada de crash no meio nem temporário órfão.
+        missing = _missing_dependency()
+        if missing is not None:
+            logger.warning("Dependência ausente para %s: %s", task.id, missing)
+            self._set_failed(task, missing)
+            return task
+
         try:
             reservation = reserve(final_path, download_dir)
         except DestinationBusy as e:
@@ -366,7 +415,7 @@ class DownloadManager:
 
         try:
             yt_dlp = _load_yt_dlp()
-            url = f"https://music.youtube.com/watch?v={task.video_id}"
+            url = WATCH_URL.format(video_id=task.video_id)
 
             try:
                 with yt_dlp.YoutubeDL(

@@ -14,6 +14,19 @@ from ytmusic_tui.library.database import db_manager
 
 
 @pytest.fixture(autouse=True)
+def _ffmpeg_on_path(monkeypatch):
+    """Aponta um ffmpeg fictício: a suíte não depende do host (§8.4/T06).
+
+    O worker checa yt-dlp/ffmpeg antes de reservar; sem isso, máquinas sem
+    ffmpeg instalado quebrariam dezenas de testes sem relação com o assunto.
+    O caso "ffmpeg ausente" é testado explicitamente em ``tests/security``.
+    """
+    import ytmusic_tui.download as download_mod
+
+    monkeypatch.setattr(download_mod, "_which_ffmpeg", lambda: "/usr/bin/ffmpeg")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_library_db(tmp_path, monkeypatch):
     """Redireciona o banco global para ``tmp_path``, migrado, e zera o engine.
 
