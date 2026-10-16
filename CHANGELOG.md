@@ -69,6 +69,33 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   tipado (`InvalidResponseError`) com mensagem "esperado × recebido", em vez
   de um `AttributeError` genérico — músicas e álbuns são validados antes do
   uso, e a UI mostra o caso sem mudanças
+- Integração com o YouTube Music endurecida (T10): a camada `api/` devolve
+  **modelos internos** (título, artistas, duração, álbum, thumbnails) —
+  nenhuma camada acima vê objetos do `ytmusicapi`; campos ausentes × inválidos
+  são explícitos e o formato duplo de alguns campos (álbum como objeto ou
+  texto) é aceito
+- Erros de rede/serviço classificados (T10): sem rede, tempo esgotado,
+  serviço fora, não encontrado, resposta inválida e limite de requisições
+  viram mensagens compreensíveis na busca, com o erro cru preservado como
+  causa para o log
+- Tentativas automáticas só para falhas transitórias (T10): até 3 tentativas
+  com espera crescente (0,5 s → 1 s → 2 s); HTTP 429 re-tenta, 4xx definitivo
+  não; uma busca nova abandona as tentativas da anterior — a primeira
+  tentativa de cada busca sempre roda
+- Timeouts separados de conexão (5 s) e leitura (15 s) (T10): conexão que
+  morre não fica pendurada esperando o servidor; pior caso ~60 s documentado
+  (3 tentativas por requisição, 2 requisições em paralelo)
+- Cache em disco de busca (5 min) e álbum (24 h) (T10): resposta recente sai
+  do cache sem tocar a rede; envelope versionado, escrita atômica, teto de
+  20 MiB com poda dos mais antigos e diretório `cache_dir/api` 0700 — URL de
+  stream **nunca** é cacheada, e falha de cache nunca quebra o app
+- Aba ⚙️ Config informa a versão instalada × testada de `ytmusicapi` e
+  `yt-dlp` (T10): quando a instalada é mais velha que a do `uv.lock`, orienta
+  atualizar; um teste amarra as duas pontas (lock novo sem confirmar a versão
+  testada = CI vermelho)
+- Monitor de contrato do serviço real (T10): o teste de integração opt-in
+  compara a resposta crua com o que os adaptadores consomem e gera um
+  relatório por campo e por item quando o formato mudar — o anexo da correção
 
 ### Alterado
 
