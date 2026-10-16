@@ -42,6 +42,7 @@ from ytmusic_tui.tui.widgets import (
     SongListView,
     TrackListView,
 )
+from ytmusic_tui.versions import render_dependencies
 
 
 class MainScreen(PlaybackController, DownloadController, LibraryController, Screen):
@@ -177,6 +178,14 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
                             "Auto-play próxima",
                             value=settings.auto_play_next,
                             id="setting-autoplay",
+                        )
+                    with Collapsible(title="Dependências", collapsed=True):
+                        yield Static(render_dependencies(), id="dependency-status")
+                        yield Static(
+                            "Compara a versão instalada com a testada pelo projeto "
+                            "(ytmusicapi e yt-dlp). Se aparecer 'atualize', rode "
+                            "uv sync (ou atualize/reinstale o app).",
+                            id="dependency-info",
                         )
 
         yield NowPlayingBar(id="now-playing")

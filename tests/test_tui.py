@@ -243,6 +243,22 @@ async def test_nova_busca_abandona_retry_da_anterior(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_config_tab_mostra_versoes_das_dependencias(monkeypatch):
+    """R5: a aba Config informa versões instalada × testada (T10-R5)."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        block = screen.query_one("#dependency-status", Static)
+        rendered = str(block.render())
+
+        assert "ytmusicapi" in rendered
+        assert "yt-dlp" in rendered
+        assert "testada" in rendered
+
+
+@pytest.mark.asyncio
 async def test_search_message_accepts_brackets():
     """Mensagens de erro da busca podem conter [colchetes]."""
     app = YTMusicTUI()
