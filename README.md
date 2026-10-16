@@ -294,11 +294,12 @@ fica cru no arquivo. O log é 0600, com rotação de 1 MB × 3 backups (máximo 
 
 ### Diagnóstico (`ytmusic-tui doctor`)
 
-O comando `ytmusic-tui doctor` (ou `python -m ytmusic_tui doctor`) verifica o
-ambiente **sem abrir a interface e sem alterar nada**: versões (app, Python,
-ytmusicapi, yt-dlp), libmpv e binários `mpv`/`ffmpeg`, diretórios (existência,
-escrita, modo), banco da biblioteca em somente leitura (`integrity_check` +
-versão do esquema × app) e resíduos de manutenção (quarentena, backups, log).
+O comando `ytmusic-tui doctor` (ou `python -m ytmusic_tui doctor`) diagnostica
+o ambiente **sem abrir a interface** — as verificações não criam, alteram nem
+baixam arquivos: versões (app, Python, ytmusicapi, yt-dlp), libmpv e binários
+`mpv`/`ffmpeg`, diretórios (existência, escrita, modo), banco da biblioteca em
+somente leitura (`integrity_check` + versão do esquema × app) e resíduos de
+manutenção (quarentena, backups, log).
 
 ```bash
 ytmusic-tui doctor

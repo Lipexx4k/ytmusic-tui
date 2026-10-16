@@ -4,6 +4,36 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
 O formato segue livremente o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- Logs estruturados em JSON Lines (T13): cada linha do log é um objeto
+  JSON com campos fixos (`ts`, `level`, `component`, `operation_id`,
+  `event`, `error_code`, `message`; `detail` com o traceback em erros) e
+  eventos para subida/parada do app (com as versões), download
+  iniciado/concluído/falhou (código de saída do ffmpeg quando presente),
+  retentativas da API, migrações do banco, erros de banco, quarentena e
+  recuperação de downloads interrompidos — dá para filtrar com `jq`
+- Privacidade no log (T13): o mascaramento é aplicado na gravação — HOME
+  vira `~`, URLs perdem query/token e cabeçalhos de credencial
+  (`Authorization`, `Cookie`, `Set-Cookie`) viram `[REDACTED]` — e a
+  consulta digitada na busca deixou de ser registrada
+- Novo diagnóstico `ytmusic-tui doctor` (T13): checa versões, libmpv,
+  `mpv`/`ffmpeg`, diretórios (existência, escrita, modo), banco da
+  biblioteca em somente leitura (`integrity_check` + versão do esquema ×
+  app) e resíduos de manutenção, com saída mascarada pronta para colar
+  numa issue; exit code 0 (avisos) ou 1 (algo essencial quebrado), sem
+  abrir a TUI
+
+### Corrigido
+
+- Encerramento do app sob carga (T13): o registro de parada (`app_stop`)
+  sai depois do teardown dos componentes — registrá-lo antes alargava a
+  janela de uma corrida rara do encerramento do player (herdada do T11)
+  que travava a suíte de integração local; a ordem ficou travada por
+  teste de regressão
+
 ## [0.1.4] - 2026-10-16
 
 ### Adicionado
