@@ -10,7 +10,7 @@ from textual.worker import Worker
 from ytmusic_tui.library import library
 from ytmusic_tui.library.errors import LibraryError, describe_library_error
 from ytmusic_tui.library.recovery import reconcile
-from ytmusic_tui.log import log_file_path
+from ytmusic_tui.log import log_event, log_file_path
 from ytmusic_tui.player import player
 from ytmusic_tui.tui.messages import (
     LIBRARY_EMPTY_TEXT,
@@ -84,12 +84,26 @@ class LibraryController:
         try:
             tracks = await asyncio.to_thread(library.get_recent_tracks, limit=500)
         except LibraryError as error:
-            logger.exception("Falha ao carregar a biblioteca local")
+            log_event(
+                "tui.library",
+                "db_library_load_failed",
+                f"Falha ao carregar a biblioteca local: {error}",
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+                exc_info=True,
+            )
             if epoch == self._library_epoch:
                 self._show_library_unavailable(view, message, describe_library_error(error))
             return
         except Exception as error:
-            logger.exception("Falha ao carregar a biblioteca local")
+            log_event(
+                "tui.library",
+                "db_library_load_failed",
+                f"Falha ao carregar a biblioteca local: {error}",
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+                exc_info=True,
+            )
             if epoch == self._library_epoch:
                 self._show_library_unavailable(view, message, str(error))
             return
@@ -145,9 +159,16 @@ class LibraryController:
         """Executa a varredura fora do loop e resume o resultado na UI."""
         try:
             report = await asyncio.to_thread(reconcile)
-        except Exception:
+        except Exception as error:
             # Falha na reconciliação não apaga nada; fica registrada no log.
-            logger.exception("Falha na reconciliação de arquivos")
+            log_event(
+                "tui.library",
+                "db_reconcile_failed",
+                f"Falha na reconciliação de arquivos: {error}",
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+                exc_info=True,
+            )
             return
         if report.has_findings:
             self._toast(reconciliation_summary(report.summary()))

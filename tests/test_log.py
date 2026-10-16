@@ -170,3 +170,274 @@ def test_rotacao_mantem_json_e_0600(tmp_path, monkeypatch):
     finally:
         for handler in package_logger.handlers:
             handler.close()
+
+
+# ===== eventos obrigatórios (T13 §13.1) =====
+
+
+def _neutralizar_reconciliacao(monkeypatch) -> None:
+    """Impede que o ``on_mount`` varra o ``download_dir`` real (ver test_tui)."""
+    from ytmusic_tui.library.recovery import ReconciliationReport
+    from ytmusic_tui.tui import library_controller
+
+    monkeypatch.setattr(
+        library_controller, "reconcile", lambda *args, **kwargs: ReconciliationReport()
+    )
+
+
+def test_eventos_download_started_e_finished(monkeypatch, tmp_path, caplog):
+    """Fluxo completo (yt-dlp falso) emite started/finished com o ``task.id``."""
+    from types import SimpleNamespace
+
+    import ytmusic_tui.download as download_mod
+    from ytmusic_tui.download import DownloadStatus, DownloadTask
+    from ytmusic_tui.download.store import DownloadTaskStore
+
+    class _DownloadError(Exception):
+        pass
+
+    class _YoutubeDL:
+        """Fake mínimo: "baixa", converte e dispara os ``post_hooks``."""
+
+        def __init__(self, opts: dict):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def download(self, urls: list[str]) -> None:
+            template = self.opts["outtmpl"]
+            final = Path(template.replace("%(ext)s", "mp3"))
+            final.parent.mkdir(parents=True, exist_ok=True)
+            final.write_bytes(b"audio-convertido-mp3")
+            for hook in self.opts.get("post_hooks", []):
+                hook(str(final))
+
+    monkeypatch.setattr(
+        download_mod,
+        "_load_yt_dlp",
+        lambda: SimpleNamespace(
+            utils=SimpleNamespace(DownloadError=_DownloadError), YoutubeDL=_YoutubeDL
+        ),
+    )
+    monkeypatch.setattr(
+        download_mod,
+        "settings",
+        SimpleNamespace(
+            download_dir=tmp_path,
+            download_format="mp3",
+            download_quality="320",
+            embed_metadata=False,
+            download_concurrent=1,
+        ),
+    )
+    monkeypatch.setattr(download_mod.library, "update_track_file", lambda *a, **k: None)
+
+    manager = download_mod.DownloadManager(store=DownloadTaskStore())
+    task = DownloadTask(video_id="v1", title="Música", track_id=7)
+
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.download"):
+        result = manager._download_task(task)
+
+    assert result.status is DownloadStatus.COMPLETED
+    events = {
+        getattr(record, "event", None): record
+        for record in caplog.records
+        if getattr(record, "operation_id", None) == task.id
+    }
+    assert "download_started" in events
+    assert "download_finished" in events
+    assert events["download_started"].getMessage() == "Download iniciado"
+
+
+def test_evento_download_failed_com_codigo(caplog):
+    """Falha emite ``download_failed`` com ``operation_id`` e ``error_code``."""
+    from ytmusic_tui.download import DownloadManager, DownloadStatus, DownloadTask
+
+    task = DownloadTask(video_id="v1")
+    task.transition_to(DownloadStatus.RUNNING)
+
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui.download"):
+        DownloadManager._set_failed(task, "conexão caiu", error_code="DOWNLOAD_ERROR")
+
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "download_failed")
+    assert record.operation_id == task.id
+    assert record.error_code == "DOWNLOAD_ERROR"
+    assert record.getMessage() == "Download falhou: conexão caiu"
+
+
+def test_evento_download_failed_captura_ffmpeg(caplog):
+    """Código do ffmpeg no texto vira ``FFMPEG_EXIT_N`` (§13.1 — conversão)."""
+    from ytmusic_tui.download import DownloadManager, DownloadStatus, DownloadTask
+
+    task = DownloadTask(video_id="v1")
+    task.transition_to(DownloadStatus.RUNNING)
+
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui.download"):
+        DownloadManager._set_failed(
+            task,
+            "ERROR: Postprocessing: ffmpeg exited with code 1",
+            error_code="DOWNLOAD_ERROR",
+        )
+
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "download_failed")
+    assert record.error_code == "FFMPEG_EXIT_1"
+
+
+def test_eventos_api_retry_e_falha_final(caplog):
+    """Retry re-tentado e desistência ficam no log com o erro classificado."""
+    import requests
+
+    from ytmusic_tui.api.retry import RetryPolicy, call_with_retry
+    from ytmusic_tui.errors import APIError
+
+    def _sempre_falha() -> None:
+        raise requests.exceptions.ConnectionError("conexão recusada")
+
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.api"), pytest.raises(APIError):
+        call_with_retry(
+            _sempre_falha,
+            policy=RetryPolicy(attempts=2, base_delay=0.0),
+            sleep=lambda _seconds: None,
+        )
+
+    events = [getattr(record, "event", None) for record in caplog.records]
+    assert "api_retry" in events
+    assert "api_failed" in events
+    retry_record = next(r for r in caplog.records if getattr(r, "event", None) == "api_retry")
+    failed_record = next(r for r in caplog.records if getattr(r, "event", None) == "api_failed")
+    assert retry_record.error_code == "NetworkError"
+    assert failed_record.error_code == "NetworkError"
+
+
+def test_eventos_de_migracao(caplog, tmp_path):
+    """``migration_applied`` (from→to) e ``migration_failed`` com rollback."""
+    from sqlalchemy import create_engine
+
+    from ytmusic_tui.library.errors import MigrationFailedError
+    from ytmusic_tui.library.migrations import MigrationStep, migrate
+
+    db = tmp_path / "library.db"
+    engine = create_engine(f"sqlite:///{db}")
+
+    def _quebra(connection) -> None:
+        raise RuntimeError("DDL de teste falhou")
+
+    def _migrar(steps):
+        return migrate(engine, db_path=db, backup_dir=tmp_path / "backups", migrations=steps)
+
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.library.migrations"):
+        _migrar([MigrationStep(1, "inicial", lambda connection: None)])
+    fresh = [r for r in caplog.records if getattr(r, "event", None) == "migration_applied"]
+    assert len(fresh) == 1
+    assert "v0 → v1" in fresh[0].getMessage()
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger="ytmusic_tui.library.migrations"),
+        pytest.raises(MigrationFailedError),
+    ):
+        _migrar(
+            [
+                MigrationStep(1, "inicial", lambda connection: None),
+                MigrationStep(2, "quebrada", _quebra),
+            ]
+        )
+    failed = [r for r in caplog.records if getattr(r, "event", None) == "migration_failed"]
+    assert len(failed) == 1
+    assert "v2" in failed[0].getMessage()
+    assert failed[0].error_code == "RuntimeError"
+    assert failed[0].exc_info is not None
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.library.migrations"):
+        _migrar(
+            [
+                MigrationStep(1, "inicial", lambda connection: None),
+                MigrationStep(2, "ok", lambda connection: None),
+            ]
+        )
+    applied = [r for r in caplog.records if getattr(r, "event", None) == "migration_applied"]
+    assert len(applied) == 1
+    assert "v1 → v2" in applied[0].getMessage()
+
+
+def test_evento_interrupted_recovered(caplog, tmp_path):
+    """Recuperação de tarefas interrompidas emite a contagem (T13)."""
+    from ytmusic_tui.download import DownloadManager, DownloadTask
+    from ytmusic_tui.download.store import DownloadTaskStore
+
+    store = DownloadTaskStore()
+    task = DownloadTask(video_id="v1", title="Música")
+    store.save(task, download_dir=tmp_path / "music", final_path=tmp_path / "music" / "v1.mp3")
+
+    manager = DownloadManager(store=store)
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.download"):
+        recovered = manager.recover_interrupted()
+
+    assert recovered == 1
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "interrupted_recovered")
+    assert "1 download(s)" in record.getMessage()
+
+
+def test_evento_orphan_quarantined(caplog, tmp_path):
+    """Arquivo inválido sem registro vai para quarentena com evento (T13)."""
+    from ytmusic_tui.library.recovery import reconcile
+
+    download_dir = tmp_path / "music"
+    download_dir.mkdir()
+    broken = download_dir / "Artista - Faixa.mp3"
+    broken.write_bytes(b"")
+
+    with caplog.at_level(logging.WARNING, logger="ytmusic_tui.library.recovery"):
+        report = reconcile(download_dir)
+
+    assert report.quarantined_files == [broken]
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "orphan_quarantined")
+    assert "quarentena" in record.getMessage()
+
+
+async def test_eventos_app_start_e_app_stop(monkeypatch, caplog):
+    """Ciclo do app registra as versões no início e no fim (T13 §13.1)."""
+    from ytmusic_tui.tui.app import YTMusicTUI
+
+    _neutralizar_reconciliacao(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="ytmusic_tui.tui.app"):
+        app = YTMusicTUI()
+        async with app.run_test(size=(80, 24)):
+            pass
+
+    events = [getattr(record, "event", None) for record in caplog.records]
+    assert "app_start" in events
+    assert "app_stop" in events
+    start = next(r for r in caplog.records if getattr(r, "event", None) == "app_start")
+    message = start.getMessage()
+    assert "app v" in message and "Python" in message
+    assert "ytmusicapi" in message and "yt-dlp" in message
+
+
+async def test_evento_db_open_failed(monkeypatch, caplog):
+    """Falha ao preparar o banco vira evento com o erro tipado (T13 §13.1)."""
+    from ytmusic_tui.library import db_manager
+    from ytmusic_tui.library.errors import LibraryError
+    from ytmusic_tui.tui.app import YTMusicTUI
+
+    _neutralizar_reconciliacao(monkeypatch)
+
+    def _falha() -> None:
+        raise LibraryError("banco indisponível de teste")
+
+    monkeypatch.setattr(db_manager, "migrate", _falha)
+
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui.tui.app"):
+        app = YTMusicTUI()
+        async with app.run_test(size=(80, 24)):
+            pass
+
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "db_open_failed")
+    assert record.error_code == "LibraryError"
+    assert "banco indisponível de teste" in record.getMessage()

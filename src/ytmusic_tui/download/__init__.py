@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import shutil
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +45,7 @@ from ytmusic_tui.download.task import (
 )
 from ytmusic_tui.errors import ConfigError, ExtractionError
 from ytmusic_tui.library.service import library
+from ytmusic_tui.log import log_event
 
 #: URL de watch do YouTube Music — reexportada do módulo-folha ``urls``
 #: (T11-R1); o nome ``WATCH_URL`` é o que os testes de ponta a ponta de
@@ -59,6 +61,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: Código de saída do ffmpeg no texto do yt-dlp (§13.1/T13): o app não lança
+#: subprocesso próprio — a conversão é do post-processador do yt-dlp, e o
+#: código só existe na mensagem de erro. ``FFMPEG_EXIT_N`` no ``error_code``.
+_FFMPEG_EXIT_RE = re.compile(r"ffmpeg exited with code (\d+)", re.IGNORECASE)
 
 # O import de yt_dlp é pesado (~0.4s) e não é necessário para abrir a TUI.
 # Carregamos sob demanda e guardamos o módulo para reuso/testes.
@@ -381,7 +388,9 @@ class DownloadManager:
             validate_media_file(final_path, settings.download_format)
         except MediaValidationError as e:
             logger.warning("Arquivo existente inválido em %s: %s", final_path, e)
-            self._set_failed(task, f"Arquivo existente inválido: {e}")
+            self._set_failed(
+                task, f"Arquivo existente inválido: {e}", error_code="INVALID_EXISTING"
+            )
             return task
 
         task.file_path = final_path
@@ -390,29 +399,51 @@ class DownloadManager:
             self._register_track_file(task, final_path, bitrate=0)
         except Exception as e:
             logger.exception("Falha ao registrar arquivo existente de %s na biblioteca", task.id)
-            self._set_failed(task, f"Falha ao registrar na biblioteca: {e}")
+            self._set_failed(
+                task,
+                f"Falha ao registrar na biblioteca: {e}",
+                error_code="LIBRARY_REGISTER_FAILED",
+            )
             return task
 
         if not task.can_transition_to(DownloadStatus.COMPLETED):
             return task
         task.transition_to(DownloadStatus.COMPLETED)
+        log_event("download", "download_finished", "Download concluído", operation_id=task.id)
         return task
 
     @staticmethod
-    def _set_failed(task: DownloadTask, error: str) -> None:
+    def _set_failed(task: DownloadTask, error: str, *, error_code: str | None = None) -> None:
         """Marca FAILED se a máquina permitir; nunca sobrescreve terminal.
 
         §8.3/T06: este é o ponto ÚNICO em que ``task.error`` é escrito com
         texto de terceiro (yt-dlp/OS) — a mensagem é mascarada aqui, então a
         tabela de downloads, o toast de falha e o espelho nunca veem caminho
-        do HOME nem URL com token. O log preserva o detalhe cru.
+        do HOME nem URL com token. O log recebe o texto cru; o formatter o
+        mascara (§13.2/T13).
+
+        T13 §13.1: emite ``download_failed`` com ``operation_id = task.id`` e
+        ``error_code`` do chamador; código de saída do ffmpeg presente no
+        texto prevalece (extração/conversão), ex.: ``FFMPEG_EXIT_1``.
 
         Em corrida com cancelamento/shutdown (que fecham a tarefa antes), a
         transição já não é válida e o estado final existente é preservado.
         """
-        if task.can_transition_to(DownloadStatus.FAILED):
-            task.error = mask_diagnostics(error)
-            task.transition_to(DownloadStatus.FAILED)
+        if not task.can_transition_to(DownloadStatus.FAILED):
+            return
+        task.error = mask_diagnostics(error)
+        task.transition_to(DownloadStatus.FAILED)
+        ffmpeg_exit = _FFMPEG_EXIT_RE.search(error)
+        if ffmpeg_exit is not None:
+            error_code = f"FFMPEG_EXIT_{ffmpeg_exit.group(1)}"
+        log_event(
+            "download",
+            "download_failed",
+            f"Download falhou: {error}",
+            operation_id=task.id,
+            error_code=error_code,
+            level=logging.ERROR,
+        )
 
     @staticmethod
     def _finish_cancelled(task: DownloadTask) -> None:
@@ -435,6 +466,7 @@ class DownloadManager:
             return task
         task.transition_to(DownloadStatus.RUNNING)
         self._persist_status(task)
+        log_event("download", "download_started", "Download iniciado", operation_id=task.id)
 
         download_dir = settings.download_dir
         try:
@@ -447,7 +479,7 @@ class DownloadManager:
             )
         except InvalidInputError as e:
             logger.warning("Entrada inválida para %s: %s", task.id, e)
-            self._set_failed(task, f"Entrada inválida: {e}")
+            self._set_failed(task, f"Entrada inválida: {e}", error_code="INVALID_INPUT")
             return task
 
         # Q2(a): destino já existe → não baixa; valida e registra o existente.
@@ -463,20 +495,28 @@ class DownloadManager:
         missing = _missing_dependency()
         if missing is not None:
             logger.warning("Dependência ausente para %s: %s", task.id, missing)
-            self._set_failed(task, missing)
+            self._set_failed(task, missing, error_code="DEPENDENCY_MISSING")
             return task
 
         try:
             reservation = reserve(final_path, download_dir)
         except DestinationBusy as e:
             logger.info("Destino já reservado por outra tarefa (%s): %s", task.id, e)
-            self._set_failed(task, "Outra tarefa já está baixando para este arquivo")
+            self._set_failed(
+                task,
+                "Outra tarefa já está baixando para este arquivo",
+                error_code="DESTINATION_BUSY",
+            )
             return task
         except ConfigError as e:
             # §8.3/T06: download_dir indisponível/pasta de trabalho recusada
             # (permissão etc.) → erro claro na tarefa, nunca crash no worker.
             logger.warning("Não foi possível preparar o trabalho de %s: %s", task.id, e)
-            self._set_failed(task, f"Não foi possível preparar o diretório de trabalho: {e}")
+            self._set_failed(
+                task,
+                f"Não foi possível preparar o diretório de trabalho: {e}",
+                error_code="WORKDIR_UNAVAILABLE",
+            )
             return task
 
         try:
@@ -495,17 +535,17 @@ class DownloadManager:
                     self._finish_cancelled(task)
                 elif (extraction := _extraction_error(e, yt_dlp)) is not None:
                     # T11-R4/Q-D: falha de extração ganha o rótulo da raiz
-                    # (ExtractionError) com a próxima ação; o log preserva o
-                    # detalhe cru (a mensagem da tarefa é mascarada).
+                    # (ExtractionError) com a próxima ação; o log recebe o
+                    # detalhe cru (mascarado pelo formatter desde o T13).
                     logger.warning("Extração falhou para %s: %s", task.id, e)
-                    self._set_failed(task, str(extraction))
+                    self._set_failed(task, str(extraction), error_code="EXTRACTION_FAILED")
                 elif isinstance(e, yt_dlp.utils.DownloadError):
-                    self._set_failed(task, str(e))
+                    self._set_failed(task, str(e), error_code="DOWNLOAD_ERROR")
                 else:
                     logger.exception(
                         "Erro inesperado no download %s (vídeo %s)", task.id, task.video_id
                     )
-                    self._set_failed(task, f"Erro inesperado: {e}")
+                    self._set_failed(task, f"Erro inesperado: {e}", error_code="UNEXPECTED")
                 return task
 
             # Corrida conhecida: cancelamento/encerramento entre o fim do
@@ -524,11 +564,13 @@ class DownloadManager:
                 publish_file(temp, final_path)
             except (PipelineError, OSError) as e:
                 logger.warning("Publicação falhou para %s: %s", task.id, e)
-                self._set_failed(task, f"Falha na publicação: {e}")
+                self._set_failed(task, f"Falha na publicação: {e}", error_code="PUBLISH_FAILED")
                 return task
             except Exception as e:
                 logger.exception("Erro inesperado na publicação de %s", task.id)
-                self._set_failed(task, f"Erro inesperado na publicação: {e}")
+                self._set_failed(
+                    task, f"Erro inesperado na publicação: {e}", error_code="UNEXPECTED"
+                )
                 return task
 
             # Publicado: o ``file_path`` da tarefa passa a ser o destino final.
@@ -540,12 +582,17 @@ class DownloadManager:
                 # Arquivo publicado sem registro (risco §1.3): falha explícita,
                 # nunca COMPLETED; a reconciliação (§5.3/T03) importa o órfão.
                 logger.exception("Falha ao registrar %s na biblioteca", task.id)
-                self._set_failed(task, f"Falha ao registrar na biblioteca: {e}")
+                self._set_failed(
+                    task,
+                    f"Falha ao registrar na biblioteca: {e}",
+                    error_code="LIBRARY_REGISTER_FAILED",
+                )
                 return task
 
             if not task.can_transition_to(DownloadStatus.COMPLETED):
                 return task
             task.transition_to(DownloadStatus.COMPLETED)
+            log_event("download", "download_finished", "Download concluído", operation_id=task.id)
             return task
         finally:
             release(reservation)
@@ -736,11 +783,13 @@ class DownloadManager:
                 continue
             recovered.append(hydrate_interrupted(row))
         self._queue.extend(recovered)
-        if recovered:
-            logger.info(
-                "Recuperação: %d download(s) interrompido(s) aguardando decisão (r/d)",
-                len(recovered),
-            )
+        # §13.1/T13: contagem de retomadas — com 0, o registro diz
+        # explicitamente que nada ficou pela metade.
+        log_event(
+            "download",
+            "interrupted_recovered",
+            f"Recuperação: {len(recovered)} download(s) interrompido(s) aguardando decisão (r/d)",
+        )
         return len(recovered)
 
     def _interrupted_in_queue(self, task_id: str) -> DownloadTask | None:

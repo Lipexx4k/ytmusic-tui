@@ -24,12 +24,13 @@ from ytmusic_tui.api import ytmusic
 from ytmusic_tui.download import download_manager
 from ytmusic_tui.library import db_manager
 from ytmusic_tui.library.errors import LibraryError
-from ytmusic_tui.log import setup_logging
+from ytmusic_tui.log import log_event, setup_logging
 from ytmusic_tui.player import PlayerEvent, PlayerState, TrackInfo, player
 from ytmusic_tui.tui.dialogs import HelpScreen
 from ytmusic_tui.tui.messages import player_error
 from ytmusic_tui.tui.screens import MainScreen
 from ytmusic_tui.tui.widgets import NowPlayingBar
+from ytmusic_tui.versions import versions_summary
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,9 @@ class YTMusicTUI(App):
 
     def on_mount(self) -> None:
         """Inicialização após montagem."""
+        # T13 (§13.1): primeiro registro da sessão — com versões, para o
+        # log dizer sozinho QUAL combinação de app/Python/dependências rodou.
+        log_event("tui.app", "app_start", versions_summary())
         # Abrir o banco na versão do esquema (T05-R1/R2): banco novo nasce
         # no esquema atual; legado ganha backup e migra; incompatível vira
         # erro tipado — nunca create_all silencioso. Falha não derruba o
@@ -70,7 +74,13 @@ class YTMusicTUI(App):
             db_manager.migrate()
         except LibraryError as error:
             self.db_error = error
-            logger.error("Falha ao preparar o banco da biblioteca: %s", error)
+            log_event(
+                "tui.app",
+                "db_open_failed",
+                f"Falha ao preparar o banco da biblioteca: {error}",
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+            )
 
         # T04-R2: tarefas deixadas por uma execução anterior viram INTERRUPTED
         # e entram na fila, para a UI oferecer retomar (r) / descartar (d).
@@ -187,6 +197,7 @@ class YTMusicTUI(App):
 
     def on_unmount(self) -> None:
         """Limpeza ao sair."""
+        log_event("tui.app", "app_stop", versions_summary())
         if self._ui_timer:
             self._ui_timer.stop()
         # T11-R2: sai da lista antes de encerrar — um app desmontado não pode

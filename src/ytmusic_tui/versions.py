@@ -13,7 +13,10 @@ usuário, não resolver semver.
 """
 
 import importlib.metadata
+import platform
 from dataclasses import dataclass
+
+from ytmusic_tui import __version__
 
 __all__ = [
     "DEPENDENCIES",
@@ -24,6 +27,7 @@ __all__ = [
     "parse_version",
     "render_dependencies",
     "status_for",
+    "versions_summary",
 ]
 
 #: Versões validadas pela suíte/CI (as do ``uv.lock``).
@@ -112,3 +116,17 @@ def check_dependencies() -> list[DependencyStatus]:
 def render_dependencies() -> str:
     """Bloco curto para a aba Config (uma linha por dependência)."""
     return "\n".join(status.describe() for status in check_dependencies())
+
+
+def versions_summary() -> str:
+    """Linha única com app, Python e as dependências externas (T13).
+
+    Usada pelos eventos ``app_start``/``app_stop`` (§13.1) e pelo cabeçalho
+    do ``doctor`` — um lugar só para o formato.
+    """
+    installed = {status.name: (status.installed or "ausente") for status in check_dependencies()}
+    return (
+        f"app v{__version__} · Python {platform.python_version()} · "
+        f"ytmusicapi {installed.get('ytmusicapi', 'ausente')} · "
+        f"yt-dlp {installed.get('yt-dlp', 'ausente')}"
+    )

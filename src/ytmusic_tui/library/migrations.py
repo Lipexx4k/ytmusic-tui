@@ -39,6 +39,7 @@ from ytmusic_tui.library.errors import (
     translate_db_error,
 )
 from ytmusic_tui.library.models import Base
+from ytmusic_tui.log import log_event
 from ytmusic_tui.permissions import secure_directory, secure_file
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,7 @@ def migrate(
     backup = _backup(engine, path, backup_dir, version, target, reference)
     applied = _apply_pending(engine, pending, backup, reference)
     _prune_backups(backup.parent, path, keep_backups, current=backup)
+    log_event("library.migrations", "migration_applied", f"esquema v{version} → v{target}")
     return MigrationOutcome(
         created=False,
         from_version=version,
@@ -227,7 +229,11 @@ def _create_fresh(
         if translated is not None:
             raise translated from error
         raise
-    logger.info("Banco novo criado no esquema atual v%s: %s", target, path)
+    log_event(
+        "library.migrations",
+        "migration_applied",
+        f"Esquema v0 → v{target} (banco novo: {path})",
+    )
     return MigrationOutcome(
         created=True,
         from_version=0,
@@ -273,12 +279,21 @@ def _apply_pending(
                 step.apply(connection)
                 _stamp(connection, step.version, step.description, reference)
         except Exception as error:
-            raise MigrationFailedError(
+            detail = (
                 f"migração v{step.version} falhou e foi revertida "
                 f"(dados intactos; backup pré-migração em {backup_path})"
-            ) from error
+            )
+            log_event(
+                "library.migrations",
+                "migration_failed",
+                detail,
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+                exc_info=True,
+            )
+            raise MigrationFailedError(detail) from error
         applied.append(step.version)
-        logger.info("Esquema migrado para v%s: %s", step.version, step.description)
+        logger.debug("passo de migração aplicado: v%s (%s)", step.version, step.description)
     return applied
 
 

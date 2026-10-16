@@ -41,6 +41,7 @@ from ytmusic_tui.download.pipeline import (
 )
 from ytmusic_tui.download.store import DownloadTaskStore, PendingTaskFiles
 from ytmusic_tui.library.service import LibraryService, library
+from ytmusic_tui.log import log_event
 from ytmusic_tui.permissions import secure_directory
 
 logger = logging.getLogger(__name__)
@@ -141,9 +142,21 @@ def reconcile(
         except MediaValidationError as error:
             quarantine = _quarantine(download_dir, path)
             report.quarantined_files.append(path)
-            logger.warning("Arquivo inválido isolado em quarentena (%s): %s", error, quarantine)
-        except Exception:
-            logger.exception("Falha ao importar arquivo órfão %s", path)
+            log_event(
+                "library.recovery",
+                "orphan_quarantined",
+                f"arquivo inválido isolado em quarentena ({error}): {quarantine}",
+                level=logging.WARNING,
+            )
+        except Exception as error:
+            log_event(
+                "library.recovery",
+                "db_orphan_import_failed",
+                f"Falha ao importar arquivo órfão: {path}",
+                level=logging.ERROR,
+                error_code=type(error).__name__,
+                exc_info=True,
+            )
         else:
             report.imported_files.append(path)
             logger.info("Arquivo órfão importado para a biblioteca: %s", path)

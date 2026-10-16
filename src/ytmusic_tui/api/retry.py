@@ -23,10 +23,9 @@ from typing import TypeVar
 
 from ytmusic_tui.api.classify import classify_exception
 from ytmusic_tui.errors import APIError
+from ytmusic_tui.log import log_event
 
 __all__ = ["RetryPolicy", "call_with_retry"]
-
-logger = logging.getLogger("ytmusic_tui.api")
 
 T = TypeVar("T")
 
@@ -69,18 +68,28 @@ def call_with_retry(
         except Exception as exc:
             error = classify_exception(exc, context=context)
             if not error.retryable or attempt >= policy.attempts:
+                # §13.1/T13: falha final (não re-tentável ou teto esgotado)
+                # fica no log com o código do erro tipado; os abortos abaixo
+                # são vontade do usuário (A1) e não entram como falha.
+                log_event(
+                    "api",
+                    "api_failed",
+                    f"Falha final da API: {error}",
+                    error_code=type(error).__name__,
+                    level=logging.WARNING,
+                )
                 raise error from exc
             last_error = error
             if should_abort is not None and should_abort():
                 # Usuário abandonou: sem novas tentativas (A1).
                 raise error from exc
             delay = policy.delay_for(attempt)
-            logger.info(
-                "tentativa %d/%d falhou (%s); nova tentativa em %.1fs",
-                attempt,
-                policy.attempts,
-                error,
-                delay,
+            log_event(
+                "api",
+                "api_retry",
+                f"Tentativa {attempt}/{policy.attempts} falhou ({error}); "
+                f"nova tentativa em {delay:.1f}s",
+                error_code=type(error).__name__,
             )
             sleep(delay)
             if should_abort is not None and should_abort():
