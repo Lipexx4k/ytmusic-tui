@@ -260,6 +260,14 @@ LIKE_ADDED = "❤️ Curtida (local)"
 LIKE_REMOVED = "Removida das curtidas (local)"
 
 
+# --- Downloads e player (estados §12.2) ---
+DOWNLOADS_EMPTY_TEXT = (
+    "Nenhum download ainda.\nUse Ctrl+D para baixar a faixa atual ou A para o álbum aberto."
+)
+PLAYER_LOADING_TEXT = "carregando…"
+PLAYER_ERROR_TEXT = "falha"
+
+
 def library_unavailable(reason: str, log_path: str) -> str:
     """Falha de leitura da biblioteca — nunca parecer "vazia" (T05-R4)."""
     return (
@@ -305,3 +313,14 @@ INVALID_VALUE = "Valor inválido"
 
 def download_dir_error(detail: str) -> str:
     return f"Não foi possível usar o diretório: {detail}"
+
+
+def config_save_error(detail: str) -> str:
+    """Erro ao salvar a Config em 3 partes (§12.2/T12-R5)."""
+    return format_error(
+        f"Não foi possível salvar a configuração: {detail}",
+        preserved=(
+            "A alteração vale agora, mas não foi gravada — o valor anterior volta ao reabrir."
+        ),
+        next_action="Verifique permissões e espaço do arquivo de configuração.",
+    )

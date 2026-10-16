@@ -5,7 +5,7 @@ import contextlib
 import logging
 import threading
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -40,6 +40,7 @@ from ytmusic_tui.tui.messages import (
     ALBUM_EMPTY,
     ALBUM_LOADING,
     ALBUM_WITHOUT_ID,
+    DOWNLOADS_EMPTY_TEXT,
     INVALID_VALUE,
     SEARCH_INIT_DETAIL,
     SEARCH_INIT_NEXT,
@@ -48,6 +49,7 @@ from ytmusic_tui.tui.messages import (
     album_error,
     audio_quality_set,
     concurrent_set,
+    config_save_error,
     download_dir_error,
     download_dir_set,
     download_format_set,
@@ -66,6 +68,24 @@ from ytmusic_tui.tui.widgets import (
 from ytmusic_tui.versions import render_dependencies
 
 logger = logging.getLogger(__name__)
+
+# ===== §12.2: estados de tela (T12 — cada tela declara seus estados) =====
+# Busca:       inicial (dica fixa do compose; listas ocultas no on_mount) ·
+#              carregando (SEARCH_STARTING) · resultados (listas visíveis,
+#              mensagem oculta) · vazia (SEARCH_NO_RESULTS) · erro (3 partes,
+#              T12-R5).
+# Álbum:       carregando (ALBUM_LOADING) · com faixas · vazio (ALBUM_EMPTY)
+#              · erro (album_error, 3 partes).
+# Biblioteca:  carregando (LIBRARY_LOADING_TEXT) · com conteúdo (lista
+#              visível) · vazia (LIBRARY_EMPTY_TEXT) · indisponível
+#              (library_unavailable — motivo + "nada foi apagado").
+# Downloads:   fila vazia (DOWNLOADS_EMPTY_TEXT, tabela oculta) · ativa ·
+#              concluída · com falhas — a tabela aparece quando há linhas.
+# Player:      barra em parado/carregando/tocando/pausado/falha
+#              (NowPlayingBar.update_state).
+# Config:      normal · **sem estado de alterações pendentes** (decisão
+#              §12.2: salva a cada alteração real, sem botão Aplicar) · erro
+#              ao salvar (toast mascarado em 3 partes, _save_setting).
 
 
 class MainScreen(PlaybackController, DownloadController, LibraryController, Screen):
@@ -149,6 +169,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
 
             with TabPane("📥 Downloads", id="tab-downloads"):
                 yield Static("[b]Gerenciador de Downloads[/b]", classes="section-title")
+                yield Static(DOWNLOADS_EMPTY_TEXT, id="downloads-message")
                 yield DataTable(id="downloads-table")
 
             with TabPane("⚙️ Config", id="tab-settings"):  # noqa: SIM117 (compose Textual)
@@ -438,56 +459,87 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._apply_text_setting(event.input.id, event.value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Aplica seleções da aba Config."""
+        """Aplica seleções da aba Config.
+
+        §12.2 (T12): a Config salva a cada **alteração real** — não existe
+        botão Aplicar nem estado "pendente". O guard de valor existe porque
+        no mount o Textual emite ``Changed`` com o valor inicial: sem ele, a
+        abertura do app salvaria o TOML e avisaria à toa.
+        """
         if event.select.id == "setting-audio-quality" and event.value:
-            settings.update_and_save(mpv_audio_quality=str(event.value))
+            if str(event.value) == str(settings.mpv_audio_quality):
+                return  # Changed de mount com o valor atual: não é alteração
+            saved = self._save_setting(mpv_audio_quality=str(event.value))
             player.apply_audio_quality()
-            self._toast(audio_quality_set(str(event.value)))
+            if saved:
+                self._toast(audio_quality_set(str(event.value)))
         elif event.select.id == "setting-format" and event.value:
-            settings.update_and_save(download_format=str(event.value))
-            self._toast(download_format_set(str(event.value)))
+            if str(event.value) == str(settings.download_format):
+                return
+            if self._save_setting(download_format=str(event.value)):
+                self._toast(download_format_set(str(event.value)))
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        """Aplica checkboxes da aba Config."""
+        """Aplica checkboxes da aba Config (§12.2: alteração real salva na hora)."""
         if event.checkbox.id == "setting-notifications":
-            settings.update_and_save(show_notifications=event.value)
+            if event.value == settings.show_notifications:
+                return
+            self._save_setting(show_notifications=event.value)
         elif event.checkbox.id == "setting-autoplay":
-            settings.update_and_save(auto_play_next=event.value)
+            if event.value == settings.auto_play_next:
+                return
+            self._save_setting(auto_play_next=event.value)
+
+    def _save_setting(self, **updates: Any) -> bool:
+        """Grava uma alteração da Config; ``True`` = gravou, ``False`` = erro.
+
+        Decisão §12.2: "salva a cada alteração real, sem estado pendente" —
+        falha de escrita (§12.2 "erro ao salvar") não derruba a TUI: a
+        alteração vale nesta sessão (memória) e um toast em 3 partes avisa
+        que não foi gravada (§8.3: detalhe mascarado).
+        """
+        try:
+            settings.update_and_save(**updates)
+        except OSError as exc:
+            self._toast(config_save_error(mask_diagnostics(str(exc))))
+            return False
+        return True
 
     def _apply_text_setting(self, input_id: str, raw_value: str) -> None:
         """Aplica campos de texto da aba Config (Enter para confirmar).
 
         T12-R3 (inventário): ``settings.update_and_save`` grava um TOML
-        pequeno e só em ação explícita do usuário — segue síncrono; o
-        OSError já vira toast mascarado (§8.3).
+        pequeno e só em ação explícita do usuário — segue síncrono; falha de
+        escrita vira toast (§8.3/§12.2, via ``_save_setting``).
         """
         value = raw_value.strip()
         try:
             if input_id == "setting-volume":
                 volume = max(0, min(100, int(value)))
-                settings.update_and_save(mpv_volume=volume)
-                player.set_volume(volume)
-                self.query_one(NowPlayingBar).update_volume(volume)
-                self._toast(volume_set(volume))
+                if self._save_setting(mpv_volume=volume):
+                    player.set_volume(volume)
+                    self.query_one(NowPlayingBar).update_volume(volume)
+                    self._toast(volume_set(volume))
             elif input_id == "setting-download-dir":
                 path = Path(value).expanduser()
                 path.mkdir(parents=True, exist_ok=True)
-                settings.update_and_save(download_dir=path)
-                self._toast(download_dir_set(path))
+                if self._save_setting(download_dir=path):
+                    self._toast(download_dir_set(path))
             elif input_id == "setting-download-quality":
-                settings.update_and_save(download_quality=value or "320")
-                self._toast(download_quality_set(value))
+                if self._save_setting(download_quality=value or "320"):
+                    self._toast(download_quality_set(value))
             elif input_id == "setting-concurrent":
                 # A UI normaliza antes da API (T06-R4): o valor salvo e
                 # aplicado está sempre na faixa aceita pelo gerenciador.
                 concurrent = max(MIN_DOWNLOAD_CONCURRENT, min(MAX_DOWNLOAD_CONCURRENT, int(value)))
-                settings.update_and_save(download_concurrent=concurrent)
-                download_manager.set_concurrent(concurrent)
-                self._toast(concurrent_set(concurrent))
+                if self._save_setting(download_concurrent=concurrent):
+                    download_manager.set_concurrent(concurrent)
+                    self._toast(concurrent_set(concurrent))
         except (TypeError, ValueError):
             self._toast(INVALID_VALUE)
         except OSError as exc:
-            # §8.3/T06: erro do sistema traz caminho absoluto — exibe mascarado.
+            # §8.3/T06: erro ao preparar o diretório (mkdir) traz caminho
+            # absoluto — exibe mascarado.
             self._toast(download_dir_error(mask_diagnostics(str(exc))))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

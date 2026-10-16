@@ -136,7 +136,11 @@ class YTMusicTUI(App):
             return
 
         name = event.event
-        if name == "play":
+        if name == "loading":
+            # §12.2 (T12): "carregando" é estado visível — o player emite
+            # antes de abrir o stream; "play" chega em seguida com a faixa.
+            np_bar.update_state(PlayerState.LOADING)
+        elif name == "play":
             np_bar.update_track(event.data.get("track", TrackInfo()))
             np_bar.update_state(PlayerState.PLAYING)
             np_bar.update_volume(player.get_volume())

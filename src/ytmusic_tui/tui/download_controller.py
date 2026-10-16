@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 from textual.worker import Worker
 
 from ytmusic_tui.api.models import AlbumDetail
@@ -88,13 +88,20 @@ class DownloadController:
         """
         try:
             table = self.query_one("#downloads-table", DataTable)
+            message = self.query_one("#downloads-message", Static)
         except Exception:
             # A aba de downloads não está montada no momento.
             return
+        rows = self._download_rows()
+        # §12.2 (T12): fila vazia é um estado visível — a tabela sem linhas
+        # some e a dica de como começar aparece no lugar; com linhas, some a
+        # dica e volta a tabela.
+        table.display = bool(rows)
+        message.display = not rows
         table.clear(columns=True)
         table.add_columns("Status", "Título", "Artista", "Progresso", "Velocidade", "ETA")
 
-        for task in self._download_rows():
+        for task in rows:
             status_icon = {
                 DownloadStatus.PENDING: "⏳",
                 DownloadStatus.RUNNING: "⬇️",

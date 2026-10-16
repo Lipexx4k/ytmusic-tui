@@ -26,7 +26,7 @@ Screen {
     overflow-y: auto;
 }
 
-#search-message, #library-message, #album-message {
+#search-message, #library-message, #album-message, #downloads-message {
     padding: 1 2;
     color: $text-muted;
 }

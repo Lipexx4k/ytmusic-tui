@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from textual.widgets import (
+    Button,
     Checkbox,
     Collapsible,
     DataTable,
@@ -1313,7 +1314,12 @@ async def test_settings_inputs_apply(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_settings_dir_error_toast_masks_home(monkeypatch, tmp_path):
-    """OSError ao trocar o diretório de downloads aparece mascarado (§8.3/T06)."""
+    """OSError na Config vira toast mascarado (§8.3) e não derruba a TUI.
+
+    C6/§12.2: falha ao **salvar** responde em 3 partes ("erro ao salvar" da
+    tabela de estados); falha ao **usar** o diretório (mkdir) mantém a
+    mensagem específica do diretório.
+    """
     app = YTMusicTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -1328,9 +1334,20 @@ async def test_settings_dir_error_toast_masks_home(monkeypatch, tmp_path):
         screen._apply_text_setting("setting-download-dir", str(tmp_path / "downloads"))
 
         joined = "\n".join(toasts)
-        assert "Não foi possível usar o diretório" in joined
+        assert "Não foi possível salvar a configuração" in joined
+        assert "não foi gravada" in joined  # parte 2: o que foi preservado
+        assert "Verifique permissões" in joined  # parte 3: próxima ação
         assert str(Path.home()) not in joined
         assert "~/.config" in joined
+
+        # Diretório impossível (arquivo no caminho) → mensagem do diretório.
+        toasts.clear()
+        blocker = tmp_path / "bloqueado"
+        blocker.write_text("x", encoding="utf-8")
+        screen._apply_text_setting("setting-download-dir", str(blocker / "sub"))
+
+        joined = "\n".join(toasts)
+        assert "Não foi possível usar o diretório" in joined
 
 
 @pytest.mark.asyncio
@@ -2065,6 +2082,202 @@ async def test_falha_de_download_sai_em_3_partes(monkeypatch):
         assert toasts[0].startswith("❌ Falha no download: Video unavailable")
         assert "Nada foi publicado na biblioteca" in toasts[0]
         assert "tente baixar de novo" in toasts[0]
+
+
+# ===== T12 §12.2: estados por tela =====
+
+
+@pytest.mark.asyncio
+async def test_estados_da_busca(monkeypatch):
+    """§12.2: inicial, carregando, resultados, vazia e erro na aba Busca."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        message = screen.query_one("#search-message", Static)
+        songs = screen.query_one("#search-songs", SongListView)
+
+        # inicial: dica visível e listas ocultas (on_mount)
+        assert message.display and "Digite algo" in str(message.render())
+        assert not songs.display
+
+        # carregando: busca presa no to_thread até o teste liberar
+        release = threading.Event()
+
+        def _search(*args, **kwargs):
+            release.wait(timeout=5)
+            return SearchResult(tracks=(_song("v1", "Música"),))
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _search)
+        task = asyncio.create_task(screen.perform_search("teste"))
+        for _ in range(100):
+            await pilot.pause(0.01)
+            if message.display and "Buscando" in str(message.render()):
+                break
+        assert "Buscando" in str(message.render())
+        assert not songs.display
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+        await pilot.pause()
+
+        # resultados: listas visíveis e mensagem oculta
+        assert not message.display
+        assert songs.display and [s.video_id for s in songs.songs] == ["v1"]
+
+        # vazia: mensagem explica, sem listas
+        monkeypatch.setattr(ytmusic, "search_catalog", lambda *a, **k: SearchResult())
+        await screen.perform_search("nada")
+        await pilot.pause()
+        assert message.display and "Nenhum resultado encontrado" in str(message.render())
+        assert not songs.display
+
+        # erro: 3 partes (T12-R5)
+        def _fail(*args, **kwargs):
+            raise NetworkError("busca: falha de rede")
+
+        monkeypatch.setattr(ytmusic, "search_catalog", _fail)
+        await screen.perform_search("quebrada")
+        await pilot.pause()
+        rendered = str(message.render())
+        assert "Erro na busca" in rendered
+        assert "Nada foi baixado nem apagado." in rendered
+        assert not songs.display
+
+
+@pytest.mark.asyncio
+async def test_estados_da_aba_downloads(monkeypatch):
+    """§12.2: fila vazia, ativa, concluída e com falhas na aba Downloads."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        table = screen.query_one("#downloads-table", DataTable)
+        message = screen.query_one("#downloads-message", Static)
+
+        # vazia: dica visível, tabela oculta
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        screen.update_downloads_table()
+        await pilot.pause()
+        assert message.display and "Nenhum download ainda" in str(message.render())
+        assert not table.display
+
+        # ativa
+        active = DownloadTask(video_id="a", title="Em curso", id="t-ativa")
+        active.transition_to(DownloadStatus.RUNNING)
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [active])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [active])
+        screen.update_downloads_table()
+        await pilot.pause()
+        assert not message.display
+        assert table.display and table.row_count == 1
+        assert "⬇️" in str(table.get_row_at(0))
+
+        # concluída + com falhas: as duas linhas convivem na tabela
+        done = DownloadTask(video_id="b", title="Feita", id="t-ok")
+        for status in (DownloadStatus.RUNNING, DownloadStatus.VALIDATING, DownloadStatus.COMPLETED):
+            done.transition_to(status)
+        failed = DownloadTask(video_id="c", title="Quebrada", id="t-fail")
+        failed.transition_to(DownloadStatus.RUNNING)
+        failed.transition_to(DownloadStatus.FAILED)
+        failed.error = "sem rede"
+
+        monkeypatch.setattr(download_manager, "get_queue", lambda: [done, failed])
+        monkeypatch.setattr(download_manager, "get_active_downloads", lambda: [])
+        screen.update_downloads_table()
+        await pilot.pause()
+        assert table.row_count == 2
+        joined = str([table.get_row_at(i) for i in range(2)])
+        assert "✅" in joined and "❌" in joined
+
+
+@pytest.mark.asyncio
+async def test_estados_da_barra_do_player(monkeypatch):
+    """§12.2: parado, carregando, tocando, pausado e falha na barra."""
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        monkeypatch.setattr(app.screen, "_toast", lambda message: None)
+
+        bar = app.screen.query_one("#now-playing", NowPlayingBar)
+        info = bar.query_one("#np-info", Static)
+        btn = bar.query_one("#btn-play-pause", Button)
+
+        # carregando: evento emitido antes de abrir o stream
+        app._handle_player_event(PlayerEvent(event="loading"))
+        assert "carregando" in str(info.render())
+        assert "⏳" in str(btn.label)
+
+        # tocando
+        track = TrackInfo(video_id="v1", title="Faixa Teste", artist="Artista")
+        app._handle_player_event(PlayerEvent(event="play", data={"track": track}))
+        assert "Faixa Teste" in str(info.render())
+        assert "⏸" in str(btn.label)
+
+        # pausado
+        app._handle_player_event(PlayerEvent(event="pause"))
+        assert "⏸" not in str(btn.label)
+
+        # falha (visível até o próximo estado)
+        app._handle_player_event(PlayerEvent(event="error", data={"message": "boom"}))
+        assert "falha" in str(info.render())
+        assert "⚠" in str(btn.label)
+
+        # parado
+        app._handle_player_event(PlayerEvent(event="stop"))
+        assert "Faixa Teste" not in str(info.render())
+        assert "⏸" not in str(btn.label) and "⚠" not in str(btn.label)
+
+
+@pytest.mark.asyncio
+async def test_config_nao_salva_no_mount_mas_salva_alteracao_real(monkeypatch):
+    """§12.2 Config: abrir não salva nada (guard); alteração real salva na hora.
+
+    Sem o guard, o ``Changed`` de mount dos Select/Checkbox salvava o TOML e
+    avisava à toa — a decisão é "salva a cada alteração real, sem estado
+    pendente". O erro ao salvar vira toast em 3 partes mascarado.
+    """
+    saved: list[dict] = []
+    monkeypatch.setattr(
+        type(settings), "update_and_save", lambda self, **kwargs: saved.append(kwargs)
+    )
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        # mount: os Changed iniciais não são alteração real
+        assert saved == []
+
+        # mesma escolha de novo: continua sem gravar nem avisar
+        same = SimpleNamespace(
+            select=SimpleNamespace(id="setting-format"), value=settings.download_format
+        )
+        screen.on_select_changed(same)
+        assert saved == [] and toasts == []
+
+        # alteração real: grava e avisa
+        changed = SimpleNamespace(select=SimpleNamespace(id="setting-format"), value="flac")
+        screen.on_select_changed(changed)
+        assert saved[-1] == {"download_format": "flac"}
+        assert toasts and "Formato de download: flac" in toasts[0]
+
+        # erro ao salvar: toast em 3 partes, mascarado, TUI de pé
+        def _boom(self, **kwargs):
+            raise OSError(f"disco cheio em {Path.home()}/.config/config.toml")
+
+        monkeypatch.setattr(type(settings), "update_and_save", _boom)
+        toasts.clear()
+        quality = SimpleNamespace(select=SimpleNamespace(id="setting-audio-quality"), value="best")
+        screen.on_select_changed(quality)
+        assert "Não foi possível salvar a configuração" in toasts[0]
+        assert "não foi gravada" in toasts[0]
+        assert "~/.config" in toasts[0] and str(Path.home()) not in toasts[0]
 
 
 @pytest.mark.asyncio

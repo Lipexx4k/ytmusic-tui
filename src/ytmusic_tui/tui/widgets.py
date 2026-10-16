@@ -10,6 +10,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBa
 from ytmusic_tui.api.models import Album, Track
 from ytmusic_tui.library.models import Track as LibraryTrack
 from ytmusic_tui.player import PlayerState, TrackInfo
+from ytmusic_tui.tui.messages import PLAYER_ERROR_TEXT, PLAYER_LOADING_TEXT
 
 
 class AutoHighlightListView(ListView):
@@ -171,21 +172,28 @@ class NowPlayingBar(Static):
         time_total.update(self._format_time(duration))
 
     def update_state(self, state: PlayerState) -> None:
-        """Atualiza o botão play/pause e a marca de falha (T11-R3).
+        """Atualiza o botão play/pause e o texto de estado (§12.2/T11-R3).
 
-        ``ERROR`` mostra "falha" no lugar da faixa (o toast do app traz o
-        detalhe mascarado; um novo ``play`` chama ``update_track`` e
-        substitui o texto).
+        Estados da §12.2: parado (`stop`/`ended`), **carregando** (`loading`,
+        o player emite antes de abrir o stream), tocando (`play`/`resume`),
+        pausado (`pause`) e falha (`error`). ``ERROR`` mostra "falha" no lugar
+        da faixa e fica visível até o próximo estado (o toast do app traz o
+        detalhe mascarado; um novo ``play`` chama ``update_track`` e substitui
+        o texto).
         """
         btn = self.query_one("#btn-play-pause", Button)
         if state == PlayerState.PLAYING:
             btn.label = "⏸"
+        elif state == PlayerState.LOADING:
+            btn.label = "⏳"
         elif state == PlayerState.ERROR:
             btn.label = "⚠"
         else:
             btn.label = "▶"
         if state == PlayerState.ERROR:
-            self.query_one("#np-info", Static).update("[b]falha[/b]")
+            self.query_one("#np-info", Static).update(f"[b]{PLAYER_ERROR_TEXT}[/b]")
+        elif state == PlayerState.LOADING:
+            self.query_one("#np-info", Static).update(PLAYER_LOADING_TEXT)
 
     def update_volume(self, volume: int) -> None:
         """Atualiza volume."""
