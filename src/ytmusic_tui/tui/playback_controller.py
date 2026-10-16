@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ytmusic_tui.api import ytmusic
 from ytmusic_tui.api.models import Track
 from ytmusic_tui.config import settings
 from ytmusic_tui.library.errors import AudioFileMissingError, describe_library_error
@@ -70,7 +71,7 @@ class PlaybackController:
             album=song.album_name,
             duration=float(song.duration_seconds or 0),
             thumbnail_url=song.thumbnail_url,
-            source_url=f"https://music.youtube.com/watch?v={song.video_id}",
+            source_url=ytmusic.get_stream_url(song.video_id),
         )
 
     @staticmethod
@@ -79,7 +80,7 @@ class PlaybackController:
         if track.is_downloaded and track.local_path:
             source_url = str(track.local_path)
         else:
-            source_url = f"https://music.youtube.com/watch?v={track.source_id}"
+            source_url = ytmusic.get_stream_url(str(track.source_id))
         return TrackInfo(
             video_id=str(track.source_id),
             title=str(track.title),

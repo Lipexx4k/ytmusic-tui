@@ -23,9 +23,9 @@ Cache (T10-R4): busca (TTL 5 min) e álbum (TTL 24h) são servidos do disco
 quando recentes — o arquivo guarda o payload dos modelos (``api.models``),
 nunca URL de stream; falha de cache nunca quebra a operação (best-effort).
 
-``get_stream_url`` é o único ponto público de URL de watch; o player e o
-pipeline de download ainda montam a própria URL internamente (a dedup fica
-no T11 — seam documentado no plano).
+``get_stream_url`` é o único ponto público de URL de watch (T11-R1): ele
+delega para o módulo-folha ``urls``, o único lugar do ``src/`` onde o
+literal da URL existe — o player e o download também pegam de lá.
 """
 
 import functools
@@ -44,6 +44,7 @@ from ytmusic_tui.api.models import AlbumDetail, SearchResult
 from ytmusic_tui.api.retry import RetryPolicy, call_with_retry
 from ytmusic_tui.config import settings
 from ytmusic_tui.errors import InvalidResponseError
+from ytmusic_tui.urls import watch_url
 
 __all__ = ["AlbumDetail", "SearchResult", "YTMusicAPI", "ytmusic"]
 
@@ -236,8 +237,10 @@ class YTMusicAPI:
 
         O ytmusicapi não expõe uma URL de stream direta; a resolução é
         delegada ao yt-dlp, embutido no mpv, a partir da URL de watch.
+        Delega ao módulo-folha ``urls`` (T11-R1) — a UI e o download
+        compartilham a mesma montagem.
         """
-        return f"https://music.youtube.com/watch?v={video_id}"
+        return watch_url(video_id)
 
 
 # Instância global

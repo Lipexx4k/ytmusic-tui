@@ -2,8 +2,9 @@
 
 O transporte é sempre falso (sem rede): prova-se aqui a forma da saída
 (modelos internos, nunca dict cru do ytmusicapi), a validação de forma do
-T08 (lista/dict, mensagens preservadas) e a regra de fronteira — nenhum
-módulo acima de ``api/`` importa ytmusicapi (teste de fonte, A5).
+T08 (lista/dict, mensagens preservadas), a regra de fronteira — nenhum
+módulo acima de ``api/`` importa ytmusicapi (teste de fonte, A5) — e a URL
+de watch única no módulo-folha ``urls`` (teste de fonte, T11-R1).
 """
 
 import re
@@ -16,6 +17,7 @@ import ytmusic_tui.api as api_module
 from ytmusic_tui.api import SearchResult, YTMusicAPI
 from ytmusic_tui.api.models import Album, AlbumDetail, Track
 from ytmusic_tui.errors import InvalidResponseError
+from ytmusic_tui.urls import watch_url
 
 
 class _FakeYTMusic:
@@ -137,9 +139,10 @@ def test_get_album_returns_typed_detail(fake_ytmusic):
     assert [t.video_id for t in details.tracks] == ["t1"]
 
 
-def test_get_stream_url_continua_sendo_o_unico_montador_publico():
-    """Q-A: get_stream_url fica (seam documentado para o T11)."""
+def test_get_stream_url_delega_para_o_modulo_folha():
+    """Q-A + T11-R1: get_stream_url é o seam público e delega a ``urls``."""
     api = YTMusicAPI()
+    assert api.get_stream_url("X") == watch_url("X")
     assert api.get_stream_url("X") == "https://music.youtube.com/watch?v=X"
 
 
@@ -251,6 +254,41 @@ def test_fronteira_ytmusicapi_so_no_pacote_api():
     assert _YT_MUSICAPI_IMPORT.search("from ytmusicapi import YTMusic\n")
     assert _YT_MUSICAPI_IMPORT.search("from ytmusicapi.exceptions import YTMusicError\n")
     assert _YT_MUSICAPI_IMPORT.search("    import ytmusicapi\n")
+
+
+# ===== URL de watch única no módulo-folha ``urls`` (T11-R1) =====
+
+#: Literal da URL de watch: desde o T11-R1 só pode existir em ``urls.py``.
+_WATCH_LITERAL = "https://music.youtube.com/watch?v="
+
+
+def _watch_literal_offenders(root: Path) -> list[str]:
+    """Módulos (fora de ``urls.py``) que ainda montam o literal da URL."""
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "urls.py":
+            continue
+        if _WATCH_LITERAL in path.read_text(encoding="utf-8"):
+            offenders.append(str(path.relative_to(root)))
+    return offenders
+
+
+def test_literal_da_url_de_watch_so_existe_no_modulo_folha(tmp_path):
+    """T11-R1: o literal da URL de watch só existe em ``urls.py``.
+
+    Controles +/− do detector: um arquivo plantado com o literal (mesmo em
+    f-string) é pego; arquivo limpo e o próprio ``urls.py`` não são; depois,
+    a varredura de verdade sobre ``src/`` — f-string montada fora de
+    ``urls.py`` faria o teste falhar.
+    """
+    (tmp_path / "dirty.py").write_text(f'X = f"{_WATCH_LITERAL}{{video_id}}"', encoding="utf-8")
+    (tmp_path / "clean.py").write_text('X = "https://example.com"', encoding="utf-8")
+    (tmp_path / "urls.py").write_text(f'X = "{_WATCH_LITERAL}"', encoding="utf-8")
+
+    assert _watch_literal_offenders(tmp_path) == ["dirty.py"]
+
+    src = Path(ytmusic_tui.__file__).parent
+    assert _watch_literal_offenders(src) == []
 
 
 if __name__ == "__main__":

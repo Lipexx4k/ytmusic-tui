@@ -45,6 +45,11 @@ from ytmusic_tui.download.task import (
 from ytmusic_tui.errors import ConfigError
 from ytmusic_tui.library.service import library
 
+#: URL de watch do YouTube Music — reexportada do módulo-folha ``urls``
+#: (T11-R1); o nome ``WATCH_URL`` é o que os testes de ponta a ponta de
+#: segurança substituem por um servidor local (§8.4).
+from ytmusic_tui.urls import WATCH_URL_TEMPLATE as WATCH_URL
+
 __all__ = [
     "DownloadManager",
     "DownloadStatus",
@@ -66,10 +71,6 @@ _yt_dlp_module: Any | None = None
 YDL_SOCKET_TIMEOUT = 30
 YDL_RETRIES = 3
 YDL_FRAGMENT_RETRIES = 3
-
-#: URL de watch do YouTube Music; constante (em vez de f-string inline) para
-#: os testes de ponta a ponta apontarem para um servidor local (§8.4).
-WATCH_URL = "https://music.youtube.com/watch?v={video_id}"
 
 
 def _load_yt_dlp() -> Any:
