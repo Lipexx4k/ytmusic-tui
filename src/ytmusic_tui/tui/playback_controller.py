@@ -1,12 +1,28 @@
 """Fila de reprodução e ações do player (mixin de ``MainScreen``)."""
 
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ytmusic_tui.config import settings
+from ytmusic_tui.library.errors import AudioFileMissingError, describe_library_error
 from ytmusic_tui.library.models import Track
 from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.widgets import SongListView, TrackListView
+
+
+def ensure_audio_file(track: Track) -> None:
+    """Confere que o arquivo registrado da faixa existe no disco (T05-R4).
+
+    Só vale para faixa com arquivo registrado (``is_downloaded`` e
+    ``local_path``): se ele não está mais lá, levanta
+    ``AudioFileMissingError`` — a UI mostra a mensagem específica em vez de
+    mandar o player abrir um caminho que não existe.
+    """
+    if track.is_downloaded and track.local_path:
+        path = Path(str(track.local_path))
+        if not path.exists():
+            raise AudioFileMissingError(f"arquivo não encontrado: {path}")
 
 
 class PlaybackController:
@@ -98,7 +114,17 @@ class PlaybackController:
         self._start_playback(info)
 
     def play_library_track(self, track: Track) -> None:
-        """Reproduz uma faixa da biblioteca local."""
+        """Reproduz uma faixa da biblioteca local.
+
+        Arquivo registrado que sumiu do disco vira toast específico
+        (T05-R4) — melhor avisar do que mandar o player abrir um caminho
+        inexistente; a reconciliação marca a faixa na próxima passagem.
+        """
+        try:
+            ensure_audio_file(track)
+        except AudioFileMissingError as error:
+            self._toast(f"⚠️ {describe_library_error(error)}")
+            return
         view = self.query_one("#library-list", TrackListView)
         index = view.index if view.index is not None else 0
         self._play_queue = [self._track_info_from_library(t) for t in view.tracks]

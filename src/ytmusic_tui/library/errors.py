@@ -3,7 +3,8 @@
 Casos distintos pedem mensagens e ações distintas: banco vazio é normal (a
 UI mostra a biblioteca vazia), enquanto inacessível, sem permissão, esquema
 incompatível e corrompido são falhas com causas próprias — a camada TUI
-decide pelo **tipo**, nunca por string.
+decide pelo **tipo**, nunca por string, e monta o texto com
+``describe_library_error``.
 
 ``translate_db_error`` centraliza a leitura das exceções do sqlite3,
 inclusive as embrulhadas pelo SQLAlchemy (que preservam a original em
@@ -16,6 +17,7 @@ import sqlite3
 from pathlib import Path
 
 __all__ = [
+    "AudioFileMissingError",
     "BackupFailedError",
     "DatabaseCorruptError",
     "DatabaseInaccessibleError",
@@ -23,6 +25,7 @@ __all__ = [
     "LibraryError",
     "MigrationFailedError",
     "SchemaIncompatibleError",
+    "describe_library_error",
     "translate_db_error",
 ]
 
@@ -53,6 +56,59 @@ class BackupFailedError(LibraryError):
 
 class MigrationFailedError(LibraryError):
     """Uma migração falhou e foi revertida (rollback); o backup fica mantido."""
+
+
+class AudioFileMissingError(LibraryError):
+    """O arquivo registrado da faixa não está mais no disco (T05-R4)."""
+
+
+#: Mensagem central + ação por tipo, na ordem em que a checagem acontece
+#: (subclasses antes das bases). O detalhe original da exceção (caminho,
+#: versão, backup) entra entre parênteses — quem lê a tela não precisa do log.
+_ERROR_HINTS: tuple[tuple[type[LibraryError], str], ...] = (
+    (
+        DatabasePermissionError,
+        "sem permissão para acessar o banco — verifique dono e permissões do arquivo e da pasta",
+    ),
+    (
+        DatabaseCorruptError,
+        "o banco parece corrompido — restaure um backup da pasta de backups",
+    ),
+    (
+        SchemaIncompatibleError,
+        "o banco não é compatível com este app (esquema mais novo ou arquivo "
+        "estranho) — nada foi alterado",
+    ),
+    (
+        BackupFailedError,
+        "não deu para fazer o backup antes de migrar — nada foi alterado",
+    ),
+    (
+        MigrationFailedError,
+        "a migração do banco falhou e foi revertida — os dados seguem intactos",
+    ),
+    (
+        AudioFileMissingError,
+        "o arquivo desta faixa não está mais no disco — baixe de novo com Ctrl+D",
+    ),
+    (
+        DatabaseInaccessibleError,
+        "o banco está em uso ou inacessível no momento — tente de novo",
+    ),
+)
+
+
+def describe_library_error(error: LibraryError) -> str:
+    """Mensagem pronta ao usuário para um erro tipado (T05-R4).
+
+    Devolve a mensagem do caso + o detalhe original em parênteses (caminho,
+    versão, backup) — a UI não decide nada por string do sqlite3. Tipo
+    desconhecido cai no ``str(error)`` puro (nunca esconde o erro).
+    """
+    for error_type, hint in _ERROR_HINTS:
+        if isinstance(error, error_type):
+            return f"{hint} ({error})"
+    return str(error)
 
 
 #: Trechos (casefold) que denunciam arquivo corrompido/estranho no sqlite3.

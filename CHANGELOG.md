@@ -45,6 +45,13 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   ausentes (`is_missing`, migração v2 do banco): a reconciliação marca na
   primeira ocorrência e desmarca quando o arquivo volta; registrar o arquivo
   de novo limpa a marca — "registro sem arquivo" deixa de viver só no log
+- Mensagens da aba Biblioteca específicas por tipo de falha (permissão,
+  banco corrompido, esquema incompatível, backup/migração falhados, banco em
+  uso): cada caso explica o que houve e o que fazer, em vez de um erro
+  genérico — inclusive quando a falha acontece na abertura do banco
+- Aviso ao tocar uma faixa cujo arquivo registrado não está mais no disco
+  (em vez de mandar o player abrir um caminho inexistente); a reconciliação
+  marca a faixa como ausente na passagem seguinte
 
 ### Alterado
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from textual.widgets import (
@@ -20,12 +21,17 @@ from ytmusic_tui.api import SearchResult, ytmusic
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import db_manager, library
-from ytmusic_tui.library.errors import SchemaIncompatibleError
+from ytmusic_tui.library.errors import (
+    AudioFileMissingError,
+    DatabaseCorruptError,
+    SchemaIncompatibleError,
+)
 from ytmusic_tui.library.migrations import SCHEMA_VERSION
 from ytmusic_tui.library.recovery import ReconciliationReport
 from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui import download_controller, library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
+from ytmusic_tui.tui.playback_controller import ensure_audio_file
 from ytmusic_tui.tui.widgets import AlbumListView, SongListView, TrackListView
 
 
@@ -568,8 +574,19 @@ async def test_startup_schema_incompatible_does_not_crash(monkeypatch):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-    assert isinstance(app.db_error, SchemaIncompatibleError)
-    assert calls == []  # sem esquema aberto, não tenta recuperar tarefas
+        assert app.db_error is not None
+        assert isinstance(app.db_error, SchemaIncompatibleError)
+        assert calls == []  # sem esquema aberto, não tenta recuperar tarefas
+        # A aba Biblioteca mostra o caso específico (T05-R4), não "vazia":
+        # o usuário precisa saber que o banco é de um esquema mais novo.
+        message = app.screen.query_one("#library-message", Static)
+        rendered = str(message.render())
+        assert message.display is True
+        assert "Não foi possível carregar a biblioteca local" in rendered
+        assert "não é compatível" in rendered
+        assert "mais novo que o app" in rendered  # o detalhe original
+        assert "Nenhuma faixa na biblioteca local ainda" not in rendered
+        assert app.screen.query_one("#library-list", TrackListView).display is False
 
 
 @pytest.mark.asyncio
@@ -922,6 +939,34 @@ async def test_library_recovers_after_load_error(monkeypatch, caplog):
             assert len(view.children) == 1
 
 
+@pytest.mark.asyncio
+async def test_library_shows_specific_message_for_typed_error(monkeypatch, caplog):
+    """Erro tipado na consulta mostra a mensagem específica do caso (R4)."""
+
+    def _corrupt(limit=500):
+        raise DatabaseCorruptError("o arquivo não é um banco válido ou está corrompido")
+
+    monkeypatch.setattr(library, "get_recent_tracks", _corrupt)
+    app = YTMusicTUI()
+    with caplog.at_level(logging.ERROR, logger="ytmusic_tui"):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            message = screen.query_one("#library-message", Static)
+
+            assert message.display is True
+            rendered = str(message.render())
+            assert "Não foi possível carregar a biblioteca local" in rendered
+            assert "corrompido" in rendered
+            assert "restaure um backup" in rendered  # ação específica do caso
+            assert "Nenhuma faixa na biblioteca local ainda" not in rendered
+            assert screen.query_one("#library-list", TrackListView).display is False
+
+    assert any(
+        "Falha ao carregar a biblioteca local" in record.getMessage() for record in caplog.records
+    )
+
+
 def test_bindings_resolve_to_actions():
     """Todo atalho anunciado deve ter uma action correspondente."""
     for binding in MainScreen.BINDINGS:
@@ -969,6 +1014,79 @@ async def test_queue_next_previous_and_auto_play(monkeypatch):
         count = len(played)
         app._on_player_event(PlayerEvent(event="track_ended", data={}))
         assert len(played) == count
+
+
+def test_ensure_audio_file_raises_only_for_missing_registered_file(tmp_path):
+    """Só faixa com arquivo registrado ausente levanta o erro tipado (R4)."""
+    missing = tmp_path / "sumiu.mp3"
+    existing = tmp_path / "existe.mp3"
+    existing.write_bytes(b"audio")
+
+    with pytest.raises(AudioFileMissingError, match="arquivo não encontrado"):
+        ensure_audio_file(SimpleNamespace(is_downloaded=True, local_path=str(missing)))
+    # Arquivo presente: nada a fazer.
+    ensure_audio_file(SimpleNamespace(is_downloaded=True, local_path=str(existing)))
+    # Sem download registrado, ``local_path`` não é tocado (streaming normal).
+    ensure_audio_file(SimpleNamespace(is_downloaded=False, local_path=str(missing)))
+    ensure_audio_file(SimpleNamespace(is_downloaded=True, local_path=None))
+
+
+@pytest.mark.asyncio
+async def test_play_library_track_missing_file_toasts_and_skips_play(monkeypatch, tmp_path):
+    """Arquivo registrado que sumiu do disco: toast específico, sem play (R4)."""
+    played: list[TrackInfo] = []
+    monkeypatch.setattr(player, "play", lambda info: played.append(info) or True)
+
+    track = SimpleNamespace(
+        id=1,
+        source_id="vid-sumiu",
+        title="Sumiu",
+        artist_names=["Artista"],
+        is_downloaded=True,
+        local_path=str(tmp_path / "sumiu.mp3"),  # nunca criado no disco
+        album=None,
+    )
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+
+        screen.play_library_track(track)
+
+        assert played == []  # o player nem foi acionado
+        assert any("não está mais no disco" in toast for toast in toasts)
+        assert any("sumiu.mp3" in toast for toast in toasts)  # detalhe do caminho
+
+
+@pytest.mark.asyncio
+async def test_play_library_track_with_existing_file_calls_player(monkeypatch, tmp_path):
+    """Arquivo presente: a reprodução segue normal (a checagem não bloqueia)."""
+    media = tmp_path / "Existe.mp3"
+    media.write_bytes(b"audio")
+    played: list[TrackInfo] = []
+    monkeypatch.setattr(player, "play", lambda info: played.append(info) or True)
+
+    track = SimpleNamespace(
+        id=1,
+        source_id="vid-existe",
+        title="Existe",
+        artist_names=["Artista"],
+        is_downloaded=True,
+        local_path=str(media),
+        album=None,
+    )
+
+    app = YTMusicTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        app.screen.play_library_track(track)
+
+        assert len(played) == 1
+        assert played[0].source_url == str(media)
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from rich.markup import escape
 from textual.widgets import Static
 
 from ytmusic_tui.library import library
+from ytmusic_tui.library.errors import LibraryError, describe_library_error
 from ytmusic_tui.library.recovery import reconcile
 from ytmusic_tui.log import log_file_path
 from ytmusic_tui.player import player
@@ -38,7 +39,9 @@ class LibraryController:
 
         Uma falha ao consultar o banco NÃO pode parecer uma biblioteca
         vazia: o usuário acharia que perdeu as faixas baixadas. O erro é
-        registrado no log e mostrado na própria aba.
+        registrado no log e mostrado na própria aba — com a mensagem
+        específica do caso quando é tipado (T05-R4); falha na abertura do
+        banco na inicialização também aparece aqui.
         """
         try:
             view = self.query_one("#library-list", TrackListView)
@@ -46,25 +49,48 @@ class LibraryController:
         except Exception:
             return
 
+        startup_error = self._startup_db_error()
+        if startup_error is not None:
+            self._show_library_unavailable(view, message, describe_library_error(startup_error))
+            return
+
         try:
             tracks = library.get_recent_tracks(limit=500)
+        except LibraryError as error:
+            logger.exception("Falha ao carregar a biblioteca local")
+            self._show_library_unavailable(view, message, describe_library_error(error))
+            return
         except Exception as error:
             logger.exception("Falha ao carregar a biblioteca local")
-            view.set_tracks([])
-            view.display = False
-            message.update(
-                "[b]⚠️ Não foi possível carregar a biblioteca local[/b]\n"
-                f"{escape(str(error))}\n"
-                f"Nada foi apagado. Detalhes no log: {escape(str(log_file_path()))}"
-            )
-            message.display = True
-            self._toast("⚠️ Falha ao carregar a biblioteca local — detalhes no log")
+            self._show_library_unavailable(view, message, str(error))
             return
 
         view.set_tracks(tracks)
         view.display = bool(tracks)
         message.display = not tracks
         message.update(LIBRARY_EMPTY_TEXT)
+
+    def _startup_db_error(self) -> LibraryError | None:
+        """Erro tipado da abertura do banco na app (None = tudo certo).
+
+        Lido por ``getattr`` porque o mixin não herda de ``Screen``: o
+        membro é da classe host (``YTMusicTUI``), e importar o tipo dela
+        aqui criaria ciclo (app → screens → controllers).
+        """
+        app = getattr(self, "app", None)
+        return cast("LibraryError | None", getattr(app, "db_error", None))
+
+    def _show_library_unavailable(self, view: TrackListView, message: Static, reason: str) -> None:
+        """Mostra o motivo exato da falha (nunca uma lista "vazia") + o log."""
+        view.set_tracks([])
+        view.display = False
+        message.update(
+            "[b]⚠️ Não foi possível carregar a biblioteca local[/b]\n"
+            f"{escape(reason)}\n"
+            f"Nada foi apagado. Detalhes no log: {escape(str(log_file_path()))}"
+        )
+        message.display = True
+        self._toast("⚠️ Falha ao carregar a biblioteca local — detalhes no log")
 
     # ===== Reconciliação de arquivos (§5.3/T03) =====
 
