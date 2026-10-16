@@ -1,22 +1,102 @@
-"""Erros transversais da aplicação (T06 · §8.3).
+"""Erros transversais da aplicação (T06 · §8.3; T10 · §11-R2).
 
 Vive fora de ``config`` para que ``permissions`` e ``config`` possam usá-lo
 sem ciclo de import. A entrada do app (``main``) traduz ``ConfigError`` em
 mensagem amigável — falha de ambiente nunca vira traceback para o usuário.
+
+A taxonomia da API (T10-R2) dá à UI e ao retry o que cada falha pede:
+
+- ``NetworkError``            — falha de rede/caminho até o serviço (retry);
+- ``RateLimitError``          — HTTP 429 (retry);
+- ``ServiceUnavailableError`` — o serviço respondeu e recusou (sem retry);
+- ``NotFoundError``           — recurso inexistente (HTTP 404, sem retry);
+- ``InvalidResponseError``    — resposta fora do contrato (T08);
+- ``ExtractionError``         — resposta válida sem dados reproduzíveis
+  (reservado; o produtor chega com o T11 — ex.: "Sign in to confirm").
+
+``retryable`` como atributo de classe é a política do T10-R3: só falha
+transitória (``NetworkError``, ``RateLimitError``, HTTP 5xx) é re-tentada.
+O classificador puro (exceção crua → erro interno) vive em
+``ytmusic_tui.api.classify``.
 """
 
-__all__ = ["ConfigError", "InvalidResponseError"]
+__all__ = [
+    "APIError",
+    "ConfigError",
+    "ExtractionError",
+    "InvalidResponseError",
+    "NetworkError",
+    "NotFoundError",
+    "RateLimitError",
+    "ServiceUnavailableError",
+]
 
 
 class ConfigError(Exception):
     """Falha de configuração/ambiente (diretório, permissão, layout)."""
 
 
-class InvalidResponseError(Exception):
+class APIError(Exception):
+    """Base dos erros internos da API do YouTube Music (T10-R2).
+
+    Quem chama ``ytmusic_tui.api`` só precisa conhecer esta base para tratar
+    uma falha de integração; o subtipo diz o que fazer (re-tentar, avisar,
+    desistir) sem expor ``requests``/``ytmusicapi`` a quem está acima.
+
+    ``retryable`` pode ser sobrescrito por instância quando o mesmo subtipo
+    cobre casos com política diferente (ex.: ``ServiceUnavailableError`` de
+    HTTP 5xx é transitório, mas de HTTP 403 não): ``Erro(msg, retryable=True)``.
+    """
+
+    #: A operação pode ser re-tentada com backoff? (política do T10-R3)
+    retryable: bool = False
+
+    def __init__(self, *args: object, retryable: bool | None = None) -> None:
+        super().__init__(*args)
+        if retryable is not None:
+            self.retryable = retryable
+
+
+class NetworkError(APIError):
+    """Falha de rede/caminho até o serviço — transitória, re-tentável."""
+
+    retryable = True
+
+
+class RateLimitError(APIError):
+    """O serviço pediu desaceleração (HTTP 429) — re-tentável."""
+
+    retryable = True
+
+
+class ServiceUnavailableError(APIError):
+    """O serviço respondeu, mas não pode atender (5xx, 403, gate, etc.).
+
+    Não re-tentável por padrão: insistir não muda a resposta e pode piorar
+    um bloqueio temporário. Casos transitórios vêm como ``NetworkError``
+    ou ``RateLimitError`` (HTTP 429).
+    """
+
+
+class NotFoundError(APIError):
+    """O recurso pedido não existe no YouTube Music (HTTP 404)."""
+
+
+class InvalidResponseError(APIError):
     """Resposta da API com formato inesperado (T08 · §10.1; T10-R2 expande).
 
-    A busca valida a forma (lista de dicts) antes de usar o resultado: uma
-    resposta fora do contrato vira erro tipado com mensagem compreensível —
-    a UI mostra o caso, nunca um ``AttributeError`` genérico. A taxonomia
-    completa (``NetworkError``, ``RateLimitError`` etc.) é o T10-R2.
+    A validação de forma (``api._ensure_result_list`` e os adaptadores)
+    converte qualquer resposta fora do contrato em erro tipado com
+    "esperado × recebido" — a UI mostra o caso, nunca um ``AttributeError``
+    genérico. Parsing quebrado do próprio ytmusicapi (``KeyError`` etc. por
+    mudança de formato) também cai aqui, via classificador.
+    """
+
+
+class ExtractionError(APIError):
+    """Resposta válida, mas sem dados reproduzíveis (reservado ao T11).
+
+    Definido agora para a taxonomia do §11-R2 ficar completa e o mapeamento
+    testável; o produtor real chega com o T11 (resolução de stream/yt-dlp,
+    ex.: "Sign in to confirm you're not a bot").
     """

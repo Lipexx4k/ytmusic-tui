@@ -22,6 +22,9 @@ classifiers = [
 dependencies = [
     "textual>=0.52.0",
     "ytmusicapi>=1.8.0",
+    # requests já vinha como transitiva do ytmusicapi; o T10-R2/R3 a importa
+    # direto (sessão com timeouts + classificação) — declarada de verdade.
+    "requests>=2.32.0",
     "python-mpv>=0.12.0",
     "yt-dlp>=2024.1.0",
     "sqlalchemy>=2.0.0",
