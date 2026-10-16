@@ -1,9 +1,9 @@
 """Testes da reconciliação de arquivos/registros (T03, §5.3 do plano).
 
 Cobrem as quatro situações do §5.3: arquivo sem registro (importa se válido,
-quarentena se inválido), registro sem arquivo (relata, nunca apaga),
-temporários/`.part` antigos (política de idade + prefixo próprio) e a
-garantia de que arquivo final do usuário nunca é apagado.
+quarentena se inválido), registro sem arquivo (marca ``is_missing``, relata,
+nunca apaga), temporários/`.part` antigos (política de idade + prefixo
+próprio) e a garantia de que arquivo final do usuário nunca é apagado.
 """
 
 import os
@@ -124,7 +124,7 @@ def test_reconcile_is_idempotent_for_registered_files(service, download_dir):
 
 
 def test_reconcile_reports_missing_record_without_deleting(service, download_dir):
-    """Registro apontando para arquivo inexistente: relatório, sem apagar nada."""
+    """Registro apontando para arquivo inexistente: marca, relata, não apaga."""
     track_id = service.ensure_track(source_id="vid1", title="T", artist="A", album="B")
     assert track_id is not None
     missing = download_dir / "A" / "B" / "T - A.mp3"  # nunca criado no disco
@@ -133,10 +133,46 @@ def test_reconcile_reports_missing_record_without_deleting(service, download_dir
     report = reconcile(download_dir, service)
 
     assert report.missing_records == [missing]
-    # O registro continua intacto (persistência de "ausente" fica para o T05)
+    assert report.missing_marked == 1
+    # O registro continua intacto e agora persiste o estado de ausente (Q8).
     track = service.get_track_by_source_id("vid1")
     assert track is not None
     assert track.local_path == str(missing)
+    assert track.is_missing is True
+
+
+def test_reconcile_marks_missing_only_once_but_reports_always(service, download_dir):
+    """Arquivo ainda ausente: o relatório repete, a gravação não (Q8)."""
+    track_id = service.ensure_track(source_id="vid2", title="Sumiu")
+    assert track_id is not None
+    missing = download_dir / "Sumiu.mp3"
+    service.update_track_file(track_id, missing, 1, "mp3", 320)
+
+    first = reconcile(download_dir, service)
+    second = reconcile(download_dir, service)
+
+    assert first.missing_marked == 1
+    assert second.missing_marked == 0  # já estava marcada: nada a regravar
+    assert second.missing_records == [missing]  # o achado continua relatado
+
+
+def test_reconcile_clears_missing_when_file_returns(service, download_dir):
+    """Arquivo que reaparece no disco limpa a marca de ausente (Q8)."""
+    media = download_dir / "Voltou.mp3"
+    track_id = service.ensure_track(source_id="vid3", title="Voltou")
+    assert track_id is not None
+    service.update_track_file(track_id, media, 1, "mp3", 320)
+
+    assert reconcile(download_dir, service).missing_marked == 1  # sumiu
+
+    media.write_bytes(b"audio-valido")  # voltou ao disco
+    report = reconcile(download_dir, service)
+
+    assert report.missing_cleared == 1
+    assert report.missing_records == []
+    assert report.imported_files == []  # já registrado: não duplica faixa
+    track = service.get_track_by_source_id("vid3")
+    assert track is not None and track.is_missing is False
 
 
 # ===== Situação 3: temporários/`.part` antigos =====

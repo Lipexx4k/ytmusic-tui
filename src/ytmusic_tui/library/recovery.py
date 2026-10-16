@@ -5,9 +5,8 @@ situações do §5.3:
 
 1. arquivo final sem registro → importa para a biblioteca (``ensure_track`` +
    ``update_track_file`` com ``bitrate=0`` — desconhecido no import);
-2. registro sem arquivo → apenas relata/loga: o ``Track`` não tem coluna de
-   "ausente" e criar uma sem migração quebraria bancos antigos — a
-   persistência fica para o T05 (nota registrada no plano);
+2. registro sem arquivo → marca ``Track.is_missing`` (Q8/T05, coluna da
+   migração v2) e relata/loga; quando o arquivo reaparece, a marca é limpa;
 3. ``.part``/temporário antigo **sem dono** → remove somente com política
    explícita (idade > ``STALE_TEMP_AGE_HOURS`` E prefixo próprio). Com o
    espelho de tarefas (T04), temporário de tarefa aguardando decisão
@@ -66,6 +65,11 @@ class ReconciliationReport:
     #: Retidos por terem dono (tarefa aguardando decisão — r/d na TUI): não é
     #: achado, é a política de 24 h refinada pelo T04 (fica só no log).
     retained_temps: list[Path] = field(default_factory=list)
+    #: Quantas faixas tiveram ``is_missing`` marcado/limpo nesta passagem
+    #: (Q8/T05): marcar é o "registro sem arquivo"; limpar é o arquivo que
+    #: voltou. Conta só mudanças reais de estado.
+    missing_marked: int = 0
+    missing_cleared: int = 0
 
     @property
     def has_findings(self) -> bool:
@@ -86,6 +90,8 @@ class ReconciliationReport:
             parts.append(f"{len(self.quarantined_files)} em quarentena")
         if self.missing_records:
             parts.append(f"{len(self.missing_records)} registro(s) sem arquivo")
+        if self.missing_cleared:
+            parts.append(f"{self.missing_cleared} registro(s) com arquivo de volta")
         if self.removed_temps:
             parts.append(f"{len(self.removed_temps)} temporário(s) antigo(s) removido(s)")
         return "; ".join(parts) if parts else "nada a reconciliar"
@@ -141,12 +147,24 @@ def reconcile(
             report.imported_files.append(path)
             logger.info("Arquivo órfão importado para a biblioteca: %s", path)
 
-    # Situação 2: registro sem arquivo — só relatório/log (persistência → T05).
+    # Situação 2: registro sem arquivo — marca ``is_missing`` (Q8/T05) e
+    # relata/loga; registro cujo arquivo existe tem a marca limpa (o arquivo
+    # "voltou" — ou nunca sumiu e a marca era resíduo de uma passagem
+    # anterior). Só conta mudanças reais de estado.
+    missing_paths: list[Path] = []
+    present_paths: list[Path] = []
     for raw_path in sorted(registered):
         path = Path(raw_path)
-        if not path.exists():
+        if path.exists():
+            present_paths.append(path)
+        else:
+            missing_paths.append(path)
             report.missing_records.append(path)
             logger.warning("Registro sem arquivo no disco: %s", path)
+    if missing_paths:
+        report.missing_marked = service.set_missing(missing_paths, missing=True)
+    if present_paths:
+        report.missing_cleared = service.set_missing(present_paths, missing=False)
 
     # Situação 3: temporários/`.part` antigos **sem dono** (idade + prefixo).
     removed, retained = _cleanup_stale_temps(
@@ -225,7 +243,8 @@ def _import_file(service: LibraryService, download_dir: Path, path: Path) -> Non
     title, artist, album = _import_metadata(download_dir, path)
     source_id = f"local:{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:24]}"
     # Nota: reutiliza `ensure_track` (fonte YOUTUBE_MUSIC + id sintético
-    # `local:…`); a unificação do caminho de import é T05-R6/Q3.
+    # `local:…`); a identidade da faixa é (source_id, source) e o formato é
+    # atributo (`file_format`) — sem linha duplicada por formato (T05-R6).
     track_id = service.ensure_track(
         source_id=source_id,
         title=title,
@@ -235,7 +254,7 @@ def _import_file(service: LibraryService, download_dir: Path, path: Path) -> Non
     if not track_id:
         raise RuntimeError(f"não foi possível criar a faixa para {path}")
     # bitrate=0: desconhecido sem reanalisar o arquivo (`update_track_file`
-    # exige o argumento; a inferência fica para o T05).
+    # exige o argumento); 0 fica documentado como "desconhecido".
     service.update_track_file(
         track_id,
         path,

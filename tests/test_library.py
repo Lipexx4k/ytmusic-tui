@@ -236,5 +236,58 @@ def test_get_local_paths_returns_only_registered_files(library_service, tmp_path
     assert library_service.get_local_paths() == {str(media)}
 
 
+# ===== Q8/T05: estado "arquivo ausente" (is_missing) =====
+
+
+def test_new_tracks_are_not_missing_by_default(library_service):
+    """Faixa recém-criada nasce com is_missing=False (default do esquema)."""
+    track_id = library_service.ensure_track(source_id="VIDN", title="Nova")
+    assert track_id is not None
+    track = library_service.get_track_by_source_id("VIDN")
+    assert track is not None
+    assert track.is_missing is False
+
+
+def test_set_missing_marks_clears_and_counts_only_changes(library_service, tmp_path):
+    """set_missing marca, não repete a marcação e limpa quando pedido (Q8)."""
+    track_id = library_service.ensure_track(source_id="VIDM", title="Sumida")
+    assert track_id is not None
+    media = tmp_path / "Sumida.mp3"
+    media.write_bytes(b"audio")
+    library_service.update_track_file(track_id, media, 5, "mp3", 320)
+
+    assert library_service.set_missing([media], missing=True) == 1
+    track = library_service.get_track_by_source_id("VIDM")
+    assert track is not None and track.is_missing is True
+
+    # Repetir o mesmo estado não grava de novo (conta só mudanças reais).
+    assert library_service.set_missing([media], missing=True) == 0
+
+    assert library_service.set_missing([media], missing=False) == 1
+    track = library_service.get_track_by_source_id("VIDM")
+    assert track is not None and track.is_missing is False
+
+
+def test_set_missing_ignores_unknown_paths_and_empty_list(library_service, tmp_path):
+    """Caminho sem faixa registrada não muda nada (e lista vazia é no-op)."""
+    assert library_service.set_missing([], missing=True) == 0
+    assert library_service.set_missing([tmp_path / "nunca-registrado.mp3"]) == 0
+
+
+def test_update_track_file_clears_missing_mark(library_service, tmp_path):
+    """(Re)registrar o arquivo limpa a marca de ausente (Q8)."""
+    track_id = library_service.ensure_track(source_id="VIDC", title="Voltou")
+    assert track_id is not None
+    media = tmp_path / "Voltou.mp3"
+    media.write_bytes(b"audio")
+    library_service.update_track_file(track_id, media, 5, "mp3", 320)
+    assert library_service.set_missing([media], missing=True) == 1
+
+    library_service.update_track_file(track_id, media, 7, "mp3", 320)
+
+    track = library_service.get_track_by_source_id("VIDC")
+    assert track is not None and track.is_missing is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

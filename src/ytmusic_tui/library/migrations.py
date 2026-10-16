@@ -76,12 +76,33 @@ def _migration_1_sync_tables(connection: Connection) -> None:
     Base.metadata.create_all(connection)
 
 
+def _migration_2_add_is_missing(connection: Connection) -> None:
+    """Adiciona ``tracks.is_missing`` — "registro sem arquivo" (Q8/T05).
+
+    O texto da coluna é idêntico ao que o SQLAlchemy emite no esquema atual
+    (``is_missing BOOLEAN DEFAULT 0 NOT NULL``, no fim das colunas —
+    exatamente onde o ``ADD COLUMN`` a insere); o SQLite só não preserva a
+    quebra de linha do CREATE original, então a equivalência de DDL
+    novo-vs-migrado é comparada com normalização de espaços (teste). O
+    ``DEFAULT 0`` também preenche as linhas existentes, requisito de uma
+    coluna NOT NULL adicionada a tabela com dados.
+    """
+    connection.exec_driver_sql(
+        "ALTER TABLE tracks ADD COLUMN is_missing BOOLEAN DEFAULT 0 NOT NULL"
+    )
+
+
 #: Passos, em ordem — a versão corrente é a do último.
 MIGRATIONS: tuple[MigrationStep, ...] = (
     MigrationStep(
         1,
         "cria tabelas ausentes do esquema atual (ex.: download_tasks)",
         _migration_1_sync_tables,
+    ),
+    MigrationStep(
+        2,
+        "adiciona tracks.is_missing (arquivo ausente na reconciliação — Q8)",
+        _migration_2_add_is_missing,
     ),
 )
 
@@ -117,10 +138,13 @@ def migrate(
     """
     path = db_path if db_path is not None else _engine_db_path(engine)
     reference = now if now is not None else datetime.now(UTC)
+    # Alvo = última migração fornecida (na prática, SCHEMA_VERSION; listas
+    # injetadas em teste definem o próprio alvo).
+    target = migrations[-1].version if migrations else SCHEMA_VERSION
     version, tables = _inspect(engine, path)
 
     if version is None and not tables:
-        return _create_fresh(engine, path, reference)
+        return _create_fresh(engine, path, reference, target)
     if version is None:
         if "tracks" not in tables:
             raise SchemaIncompatibleError(
@@ -144,13 +168,13 @@ def migrate(
             backup_path=None,
         )
 
-    backup = _backup(engine, path, backup_dir, version, SCHEMA_VERSION, reference)
+    backup = _backup(engine, path, backup_dir, version, target, reference)
     applied = _apply_pending(engine, pending, backup, reference)
     _prune_backups(backup.parent, path, keep_backups, current=backup)
     return MigrationOutcome(
         created=False,
         from_version=version,
-        to_version=SCHEMA_VERSION,
+        to_version=target,
         applied=tuple(applied),
         backup_path=backup,
     )
@@ -188,23 +212,25 @@ def _inspect(engine: Engine, path: Path | None) -> tuple[int | None, set[str]]:
     return version, tables
 
 
-def _create_fresh(engine: Engine, path: Path | None, reference: datetime) -> MigrationOutcome:
+def _create_fresh(
+    engine: Engine, path: Path | None, reference: datetime, target: int
+) -> MigrationOutcome:
     """Banco novo: esquema atual + estampo da versão, numa única transação."""
     try:
         with _transaction(engine) as connection:
             Base.metadata.create_all(connection)
             _ensure_version_table(connection)
-            _stamp(connection, SCHEMA_VERSION, "esquema inicial (create_all)", reference)
+            _stamp(connection, target, "esquema inicial (create_all)", reference)
     except Exception as error:
         translated = translate_db_error(error, path)
         if translated is not None:
             raise translated from error
         raise
-    logger.info("Banco novo criado no esquema atual v%s: %s", SCHEMA_VERSION, path)
+    logger.info("Banco novo criado no esquema atual v%s: %s", target, path)
     return MigrationOutcome(
         created=True,
         from_version=0,
-        to_version=SCHEMA_VERSION,
+        to_version=target,
         applied=(),
         backup_path=None,
     )

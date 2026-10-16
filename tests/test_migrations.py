@@ -35,26 +35,47 @@ def _table_names(path: Path) -> set[str]:
 
 
 def _schema_dump(path: Path) -> list[tuple[str, str, str]]:
-    """DDL de todos os objetos, ordenado — insumo da equivalência."""
+    """DDL de todos os objetos, ordenado — insumo da equivalência.
+
+    O texto passa por normalização de espaços: o ``ALTER TABLE ADD COLUMN``
+    do SQLite insere a coluna no fim da linha do último campo do CREATE
+    original, então banco migrado e banco novo podem diferir só na quebra de
+    linha — os tokens (colunas, constraints, ordem) têm de ser idênticos.
+    """
     connection = sqlite3.connect(path)
     try:
         rows = connection.execute(
             "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
         )
-        return [(str(kind), str(name), str(sql)) for kind, name, sql in rows]
+        return [(str(row[0]), str(row[1]), " ".join(str(row[2]).split())) for row in rows]
+    finally:
+        connection.close()
+
+
+def _table_info(path: Path, table: str) -> dict[str, tuple[str, int, str | None]]:
+    """``PRAGMA table_info`` como {coluna: (tipo, notnull, default)}."""
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute(f"PRAGMA table_info({table})")
+        return {
+            str(row[1]): (str(row[2]), int(row[3]), None if row[4] is None else str(row[4]))
+            for row in rows
+        }
     finally:
         connection.close()
 
 
 def _make_legacy_db(path: Path) -> None:
-    """Banco no esquema T01–T04: tabelas atuais, sem download_tasks, com dados.
+    """Banco no esquema T01–T04: sem download_tasks, sem is_missing, com dados.
 
-    Sem ``schema_migrations`` (o mecanismo nasce na T05) — é exatamente o
-    que um banco real do usuário criado antes desta tarefa parece.
+    Parte do esquema atual e desfaz exatamente o que a T05 acrescenta (a
+    tabela do espelho da T04 e a coluna de ausente do Q8), sem tabela de
+    versão — é o que um banco real criado antes desta tarefa parece.
     """
     manager = DatabaseManager(path)
     manager.create_all()
     with manager.engine.begin() as connection:
+        connection.execute(text("ALTER TABLE tracks DROP COLUMN is_missing"))
         connection.execute(text("DROP TABLE download_tasks"))
         connection.execute(
             text(
@@ -84,6 +105,8 @@ def test_fresh_db_is_created_stamped_at_current_version(tmp_path):
     assert outcome.backup_path is None
     assert manager.schema_version() == migrations.SCHEMA_VERSION
     assert not (tmp_path / migrations.BACKUP_DIR_NAME).exists()  # nada a copiar
+    # O esquema atual já nasce com a coluna do Q8 (NOT NULL DEFAULT 0).
+    assert _table_info(db, "tracks")["is_missing"] == ("BOOLEAN", 1, "0")
     manager.close()
 
     # Segunda abertura é no-op: não recria nem re-estampa.
@@ -106,17 +129,22 @@ def test_legacy_db_migrates_preserving_data_and_matching_fresh_ddl(tmp_path):
     assert outcome.created is False
     assert outcome.from_version == 0
     assert outcome.to_version == migrations.SCHEMA_VERSION
-    assert outcome.applied == (1,)
+    assert outcome.applied == (1, 2)
     assert outcome.backup_path is not None and outcome.backup_path.is_file()
     assert manager.schema_version() == migrations.SCHEMA_VERSION
 
     # O backup foi tirado ANTES de qualquer DDL: estado pré-migração.
     assert "download_tasks" not in _table_names(outcome.backup_path)
-    # A migração aplicou o passo: tabela nova criada e dados preservados.
+    assert "is_missing" not in _table_info(outcome.backup_path, "tracks")
+    # A migração aplicou os passos: tabela nova criada e dados preservados.
     assert "download_tasks" in _table_names(db)
     with sqlite3.connect(db) as connection:
         assert connection.execute("SELECT COUNT(*) FROM artists").fetchone()[0] == 1
         assert connection.execute("SELECT title FROM tracks").fetchone()[0] == "Faixa"
+        # v2: linhas antigas ficam com is_missing = 0 (nada é marcado por engano).
+        assert connection.execute("SELECT is_missing FROM tracks").fetchone()[0] == 0
+    info = _table_info(db, "tracks")["is_missing"]
+    assert info == ("BOOLEAN", 1, "0")  # NOT NULL DEFAULT 0, como no esquema atual
 
     # Equivalência de DDL: banco novo vs. banco migrado são idênticos.
     fresh = tmp_path / "fresh.db"
@@ -124,6 +152,40 @@ def test_legacy_db_migrates_preserving_data_and_matching_fresh_ddl(tmp_path):
     fresh_manager.migrate()
     fresh_manager.close()
     assert _schema_dump(db) == _schema_dump(fresh)
+    manager.close()
+
+
+def test_db_at_v1_upgrades_to_v2_with_backup_and_keeps_rows(tmp_path):
+    """Banco já estampado na v1 (sem is_missing) ganha a coluna na v2."""
+    db = tmp_path / "library.db"
+    manager = DatabaseManager(db)
+    first = migrations.migrate(manager.engine, db_path=db, migrations=migrations.MIGRATIONS[:1])
+    assert first.to_version == 1
+    # create_all usa os modelos atuais; para simular fielmente um banco
+    # estampado na v1 (pré-Q8) a coluna é removida de volta e a linha antiga
+    # entra — é o estado que a v2 encontra em produção.
+    with manager.engine.begin() as connection:
+        connection.execute(text("ALTER TABLE tracks DROP COLUMN is_missing"))
+        connection.execute(
+            text(
+                "INSERT INTO tracks (source_id, title, source) "
+                "VALUES ('vidv1', 'Antiga', 'youtube_music')"
+            )
+        )
+
+    outcome = manager.migrate()
+
+    assert outcome.created is False
+    assert outcome.from_version == 1
+    assert outcome.applied == (2,)
+    assert outcome.to_version == migrations.SCHEMA_VERSION
+    assert migrations.SCHEMA_VERSION == 2
+    # Backup do estado v1 (pré-Q8) foi tirado antes do ALTER.
+    assert outcome.backup_path is not None and outcome.backup_path.is_file()
+    assert "is_missing" not in _table_info(outcome.backup_path, "tracks")
+    with sqlite3.connect(db) as connection:
+        assert connection.execute("SELECT title FROM tracks").fetchone()[0] == "Antiga"
+        assert connection.execute("SELECT is_missing FROM tracks").fetchone()[0] == 0
     manager.close()
 
 
@@ -211,7 +273,7 @@ def test_backup_restores_original_state_and_can_migrate_again(tmp_path):
     manager = DatabaseManager(db)
     second = manager.migrate()
     assert second.created is False
-    assert second.applied == (1,)
+    assert second.applied == (1, 2)
     assert manager.schema_version() == migrations.SCHEMA_VERSION
     with sqlite3.connect(db) as connection:
         assert connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 1

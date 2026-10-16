@@ -1,5 +1,6 @@
 """Serviço de alto nível para operações da biblioteca local."""
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -314,6 +315,28 @@ class LibraryService:
             )
         return {str(path) for path in rows if path}
 
+    def set_missing(self, local_paths: Iterable[Path], missing: bool = True) -> int:
+        """Marca/limpa ``is_missing`` das faixas com esses ``local_path`` (Q8).
+
+        Insumo da reconciliação: "registro sem arquivo" marca; registro cujo
+        arquivo reapareceu limpa. Só grava em quem muda de estado (devolve
+        quantas linhas mudaram); caminho sem faixa registrada é ignorado e
+        lista vazia não abre sessão.
+        """
+        wanted = {str(path) for path in local_paths}
+        if not wanted:
+            return 0
+        changed = 0
+        with self.db.session() as session:
+            tracks = (
+                session.execute(select(Track).where(Track.local_path.in_(wanted))).scalars().all()
+            )
+            for track in tracks:
+                if bool(track.is_missing) != missing:
+                    track.is_missing = missing
+                    changed += 1
+        return changed
+
     def get_recent_tracks(self, limit: int = 50) -> list[Track]:
         """Faixas adicionadas recentemente."""
         with self.db.session() as session:
@@ -343,7 +366,7 @@ class LibraryService:
     def update_track_file(
         self, track_id: int, local_path: Path, file_size: int, file_format: str, bitrate: int
     ) -> None:
-        """Atualiza info de arquivo local da faixa."""
+        """Atualiza info de arquivo local da faixa (e limpa a marca de ausente)."""
         with self.db.session() as session:
             track = session.get(Track, track_id)
             if track:
@@ -352,6 +375,7 @@ class LibraryService:
                 track.file_format = file_format
                 track.bitrate = bitrate
                 track.is_downloaded = True
+                track.is_missing = False  # Q8: o arquivo foi (re)registrado agora
 
     def ensure_track(
         self,

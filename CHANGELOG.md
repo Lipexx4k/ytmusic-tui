@@ -41,6 +41,10 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   banco, com retenção dos 5 mais recentes — backup falhou, não migra
 - Diagnóstico de integridade do banco (`PRAGMA integrity_check`) disponível
   por API para o futuro comando de diagnóstico (T13)
+- Faixas cujo arquivo registrado não está mais no disco são marcadas como
+  ausentes (`is_missing`, migração v2 do banco): a reconciliação marca na
+  primeira ocorrência e desmarca quando o arquivo volta; registrar o arquivo
+  de novo limpa a marca — "registro sem arquivo" deixa de viver só no log
 
 ### Alterado
 

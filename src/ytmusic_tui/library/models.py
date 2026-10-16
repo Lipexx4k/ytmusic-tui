@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import (
     Enum as SQLEnum,
@@ -123,6 +124,14 @@ class AlbumArtist(Base):
 
 
 class Track(Base):
+    """Uma linha por faixa identificada por ``(source_id, source)`` (Q3/T05-R6).
+
+    O formato do arquivo é atributo (``file_format``), não parte da chave: a
+    mesma faixa baixada de novo em outro formato atualiza a linha existente
+    (``update_track_file``) — nunca há linha duplicada por formato e não há
+    migração de chave.
+    """
+
     __tablename__ = "tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -165,6 +174,15 @@ class Track(Base):
     # Relacionamentos
     album_id: Mapped[int | None] = mapped_column(
         ForeignKey("albums.id", ondelete="SET NULL"), index=True
+    )
+    # Q8/T05 (migração v2): arquivo registrado não encontrado no disco na
+    # última reconciliação. Declarada depois de album_id — no fim das
+    # colunas — de propósito: é onde o ``ALTER TABLE ADD COLUMN`` da v2 a
+    # insere, e assim o DDL de banco novo casa com o migrado (equivalência
+    # por teste, com normalização de espaços). ``server_default`` preenche
+    # as linhas existentes ao migrar; a marcação visual fica na T12-R4.
+    is_missing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
     )
     album: Mapped["Album | None"] = relationship(back_populates="tracks")
     artists: Mapped[list["TrackArtist"]] = relationship(
