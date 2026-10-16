@@ -1,68 +1,36 @@
-"""Wrapper para API do YouTube Music usando ytmusicapi.
+"""Wrapper para API do YouTube Music usando ytmusicapi (T10-R1).
 
-Cliente anônimo (sem login): apenas os métodos que funcionam sem
-autenticação são expostos. Funções de conta (músicas curtidas, biblioteca
-remota, rate_song, playlists remotas) são intencionalmente omitidas — com
-o cliente anônimo o ytmusicapi responde ``YTMusicUserError: Please provide
-authentication``. A biblioteca do app é local (SQLite).
+Cliente anônimo (sem login): apenas os métodos que o app usa são expostos —
+``search_catalog``, ``get_album`` e ``get_stream_url``. Os métodos sem
+consumidor (``search`` genérico, get_song/artist/playlist/watch_playlist,
+home e moods) foram removidos no T10-R1 (Q-A): se um recurso precisar deles,
+eles voltam tipados, dirigidos pelo uso real.
+
+Nenhuma camada acima de ``api/`` vê objeto do ytmusicapi: as respostas cruas
+viram modelos internos (``api.models``) nos adaptadores (``api.adapt``) —
+um teste de fonte garante a fronteira. Funções de conta (curtidas,
+biblioteca remota, playlists remotas) seguem omitidas — com o cliente
+anônimo o ytmusicapi responde ``YTMusicUserError: Please provide
+authentication``; a biblioteca do app é local (SQLite).
+
+``get_stream_url`` é o único ponto público de URL de watch; o player e o
+pipeline de download ainda montam a própria URL internamente (a dedup fica
+no T11 — seam documentado no plano).
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from typing import Any, Literal
 
 from ytmusicapi import YTMusic
 
+from ytmusic_tui.api.adapt import album_detail_from_raw, search_result_from_raws
+from ytmusic_tui.api.models import AlbumDetail, SearchResult
 from ytmusic_tui.errors import InvalidResponseError
 
-# Filtros aceitos pelo ``YTMusic.search`` (o parâmetro é um Literal lá).
-SearchFilter = Literal[
-    "songs",
-    "videos",
-    "albums",
-    "artists",
-    "playlists",
-    "community_playlists",
-    "featured_playlists",
-    "profiles",
-    "podcasts",
-    "episodes",
-]
-
-
-@dataclass
-class SearchResult:
-    """Resultado de busca padronizado."""
-
-    tracks: list[dict[str, Any]]
-    artists: list[dict[str, Any]]
-    albums: list[dict[str, Any]]
-    playlists: list[dict[str, Any]]
-    videos: list[dict[str, Any]]
-
-
-def _ensure_result_list(raw: Any) -> list[dict[str, Any]]:
-    """Valida a forma da resposta de busca (T08 · §10.1).
-
-    ``ytmusicapi`` devolve listas de dicts; qualquer outra forma é resposta
-    fora do contrato — erro tipado com "esperado × recebido", em vez do
-    ``AttributeError`` genérico que a lista malformada causava antes (a UI
-    mostra ``str(e)``; nenhuma mudança lá).
-    """
-    if not isinstance(raw, list):
-        raise InvalidResponseError(
-            f"resposta inesperada da API: esperado lista, recebido {type(raw).__name__}"
-        )
-    for item in raw:
-        if not isinstance(item, dict):
-            raise InvalidResponseError(
-                f"resposta inesperada da API: esperado dict, recebido {type(item).__name__}"
-            )
-    return raw
+__all__ = ["AlbumDetail", "SearchResult", "YTMusicAPI", "ytmusic"]
 
 
 class YTMusicAPI:
-    """Cliente para API do YouTube Music."""
+    """Cliente para API do YouTube Music (fronteira tipada do T10-R1)."""
 
     def __init__(self) -> None:
         self._client: YTMusic | None = None
@@ -99,25 +67,13 @@ class YTMusicAPI:
         self._client = None
         self._initialized = False
 
-    @property
-    def client(self) -> YTMusic:
+    def _require_client(self) -> YTMusic:
+        """Cliente subjacente — privado: objeto do ytmusicapi não sai daqui."""
         if not self._initialized:
             self.initialize()
         if not self._client:
             raise RuntimeError("YTMusic não inicializado.")
         return self._client
-
-    def search(
-        self,
-        query: str,
-        filter: SearchFilter = "songs",
-        limit: int = 20,
-        ignore_spelling: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Busca geral no YouTube Music."""
-        return self.client.search(
-            query, filter=filter, limit=limit, ignore_spelling=ignore_spelling
-        )
 
     def search_catalog(
         self,
@@ -130,59 +86,27 @@ class YTMusicAPI:
         A busca sem filtro capa cada categoria em ~5 itens (ruim para a lista
         de músicas) e a versão sequencial custaria o dobro da latência; em
         paralelo o tempo total é o de uma requisição só (~2s, medido).
+
+        A saída é sempre ``SearchResult`` com modelos internos (T10-R1); a
+        validação de forma do T08 roda dentro de ``search_result_from_raws``.
         """
         # Resolver o cliente antes de paralelizar: o visitor id anônimo é
         # inicializado de forma lazy na primeira requisição.
-        client = self.client
+        client = self._require_client()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             tracks_future = pool.submit(client.search, query, filter="songs", limit=songs_limit)
             albums_future = pool.submit(client.search, query, filter="albums", limit=albums_limit)
-            # T08 · §10.1: valida a forma das DUAS listas antes dos filtros.
-            songs = _ensure_result_list(tracks_future.result())
-            albums = _ensure_result_list(albums_future.result())
+            return search_result_from_raws(tracks_future.result(), albums_future.result())
 
-        tracks = [s for s in songs if s.get("resultType") == "song" and s.get("videoId")]
-        albums = [a for a in albums if a.get("resultType") == "album" and a.get("browseId")]
-        return SearchResult(tracks=tracks, artists=[], albums=albums, playlists=[], videos=[])
-
-    def get_song(self, video_id: str) -> dict[str, Any]:
-        """Obtém detalhes completos de uma música."""
-        return self.client.get_song(video_id)
-
-    def get_artist(self, browse_id: str) -> dict[str, Any]:
-        """Obtém detalhes de um artista."""
-        return self.client.get_artist(browse_id)
-
-    def get_album(self, browse_id: str) -> dict[str, Any]:
-        """Obtém detalhes de um álbum."""
-        return self.client.get_album(browse_id)
-
-    def get_playlist(self, playlist_id: str, limit: int = 100) -> dict[str, Any]:
-        """Obtém detalhes de uma playlist."""
-        return self.client.get_playlist(playlist_id, limit=limit)
-
-    def get_watch_playlist(
-        self, video_id: str, limit: int = 25
-    ) -> dict[str, list[dict[str, Any]] | str | None]:
-        """Obtém playlist de reprodução (radio/watch) para uma música.
-
-        O ytmusicapi devolve um dict (chaves ``tracks``, ``lyrics`` etc.),
-        não uma lista de faixas.
-        """
-        return self.client.get_watch_playlist(video_id, limit=limit)
-
-    def get_home(self) -> list[dict[str, Any]]:
-        """Obtém página inicial (recomendações)."""
-        return self.client.get_home()
-
-    def get_mood_categories(self) -> dict[str, list[dict[str, Any]]]:
-        """Obtém categorias de humor/gênero (formato do ytmusicapi)."""
-        return self.client.get_mood_categories()
-
-    def get_mood_playlists(self, params: str) -> list[dict[str, Any]]:
-        """Obtém playlists de um humor/categoria (formato do ytmusicapi)."""
-        return self.client.get_mood_playlists(params)
+    def get_album(self, browse_id: str) -> AlbumDetail:
+        """Obtém detalhes do álbum como modelo interno (T10-R1)."""
+        raw = self._require_client().get_album(browse_id)
+        if not isinstance(raw, dict):
+            raise InvalidResponseError(
+                f"resposta inesperada da API: esperado dict, recebido {type(raw).__name__}"
+            )
+        return album_detail_from_raw(raw)
 
     def get_stream_url(self, video_id: str) -> str:
         """URL de watch para reprodução/download via yt-dlp.

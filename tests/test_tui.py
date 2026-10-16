@@ -20,7 +20,8 @@ from textual.widgets import (
 
 import ytmusic_tui.download as download_mod
 from tests.security._fakes import FakeDownloadError, FakeYoutubeDL, fake_yt_dlp
-from ytmusic_tui.api import SearchResult, ytmusic
+from ytmusic_tui.api import ytmusic
+from ytmusic_tui.api.models import Album, AlbumDetail, SearchResult, Track
 from ytmusic_tui.config import settings
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import db_manager, library
@@ -77,16 +78,16 @@ def _no_disk_reconciliation(monkeypatch):
     monkeypatch.setattr(download_manager, "_store", _NoopStore())
 
 
-def _song(video_id: str, title: str, artist: str = "Artista") -> dict:
-    return {
-        "videoId": video_id,
-        "title": title,
-        "artists": [{"name": artist}],
-        "duration": "3:20",
-        "duration_seconds": 200,
-        "album": {"name": "Álbum Y"},
-        "thumbnails": [{"url": "http://example.com/x.jpg"}],
-    }
+def _song(video_id: str, title: str, artist: str = "Artista") -> Track:
+    return Track(
+        video_id=video_id,
+        title=title,
+        artists=(artist,),
+        duration_text="3:20",
+        duration_seconds=200,
+        album_name="Álbum Y",
+        thumbnail_url="http://example.com/x.jpg",
+    )
 
 
 def _album_item(
@@ -95,56 +96,53 @@ def _album_item(
     artist: str = "Artista X",
     year: str = "2019",
     kind: str = "Album",
-) -> dict:
-    return {
-        "resultType": "album",
-        "browseId": browse_id,
-        "title": title,
-        "type": kind,
-        "year": year,
-        "artists": [{"name": artist}],
-    }
+) -> Album:
+    return Album(
+        browse_id=browse_id,
+        title=title,
+        artists=(artist,),
+        year=year,
+        kind=kind,
+    )
 
 
-def _album_details(browse_id: str = "MPREb1") -> dict:
+def _album_details(browse_id: str = "MPREb1") -> AlbumDetail:
     title, artist = "Álbum Teste", "Artista X"
-    return {
-        "browseId": browse_id,
-        "title": title,
-        "type": "Album",
-        "year": "2019",
-        "trackCount": 2,
-        "artists": [{"name": artist}],
-        "tracks": [
-            {
-                "videoId": "t1",
-                "title": "Faixa 1",
-                "artists": [{"name": artist}],
-                "album": title,
-                "duration": "3:00",
-                "duration_seconds": 180,
-                "trackNumber": 1,
-                "isAvailable": True,
-            },
-            {
-                "videoId": "t2",
-                "title": "Faixa 2",
-                "artists": [{"name": artist}],
-                "album": title,
-                "duration": "4:00",
-                "duration_seconds": 240,
-                "trackNumber": 2,
-                "isAvailable": True,
-            },
-            {
-                "videoId": "t3",
-                "title": "Faixa Indisponível",
-                "artists": [{"name": artist}],
-                "album": title,
-                "isAvailable": False,
-            },
-        ],
-    }
+    return AlbumDetail(
+        browse_id=browse_id,
+        title=title,
+        kind="Album",
+        year="2019",
+        track_count=2,
+        artists=(artist,),
+        tracks=(
+            Track(
+                video_id="t1",
+                title="Faixa 1",
+                artists=(artist,),
+                album_name=title,
+                duration_text="3:00",
+                duration_seconds=180,
+                is_available=True,
+            ),
+            Track(
+                video_id="t2",
+                title="Faixa 2",
+                artists=(artist,),
+                album_name=title,
+                duration_text="4:00",
+                duration_seconds=240,
+                is_available=True,
+            ),
+            Track(
+                video_id="t3",
+                title="Faixa Indisponível",
+                artists=(artist,),
+                album_name=title,
+                is_available=False,
+            ),
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -171,28 +169,24 @@ async def test_switch_tabs_and_render_search():
         await pilot.pause()
 
         results = SearchResult(
-            tracks=[
-                {
-                    "videoId": "abc123",
-                    "title": "Teste",
-                    "artists": [{"name": "Artista X"}],
-                    "duration": "3:20",
-                    "duration_seconds": 200,
-                    "album": {"name": "Álbum Y"},
-                    "thumbnails": [{"url": "http://example.com/x.jpg"}],
-                }
-            ],
-            artists=[],
-            albums=[],
-            playlists=[],
-            videos=[],
+            tracks=(
+                Track(
+                    video_id="abc123",
+                    title="Teste",
+                    artists=("Artista X",),
+                    duration_text="3:20",
+                    duration_seconds=200,
+                    album_name="Álbum Y",
+                    thumbnail_url="http://example.com/x.jpg",
+                ),
+            ),
         )
         screen.display_search_results(results)
         await pilot.pause()
 
         view = screen.query_one("#search-songs", SongListView)
         assert len(view.songs) == 1
-        assert view.songs[0]["videoId"] == "abc123"
+        assert view.songs[0].video_id == "abc123"
         # C1: o item precisa existir de fato no DOM (antes: 0 ListItems)
         assert len(view.children) == 1
 
@@ -249,11 +243,8 @@ async def test_search_shows_albums_with_type_marker(monkeypatch):
             ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
-                tracks=[_song("v1", "Música")],
-                artists=[],
-                albums=[_album_item()],
-                playlists=[],
-                videos=[],
+                tracks=(_song("v1", "Música"),),
+                albums=(_album_item(),),
             ),
         )
 
@@ -271,11 +262,7 @@ async def test_search_shows_albums_with_type_marker(monkeypatch):
         assert "Album" in label and "2019" in label  # marcador do tipo
 
         # Sem álbuns, a seção some e a lista de músicas ocupa o espaço
-        screen.display_search_results(
-            SearchResult(
-                tracks=[_song("v2", "Só música")], artists=[], albums=[], playlists=[], videos=[]
-            )
-        )
+        screen.display_search_results(SearchResult(tracks=(_song("v2", "Só música"),)))
         await pilot.pause()
         assert not albums.display
         assert songs.display and len(songs.songs) == 1
@@ -293,9 +280,7 @@ async def test_selecting_album_opens_tab_with_tracks(monkeypatch):
         monkeypatch.setattr(
             ytmusic,
             "search_catalog",
-            lambda *args, **kwargs: SearchResult(
-                tracks=[], artists=[], albums=[_album_item()], playlists=[], videos=[]
-            ),
+            lambda *args, **kwargs: SearchResult(albums=(_album_item(),)),
         )
         monkeypatch.setattr(ytmusic, "get_album", _album_details)
 
@@ -316,7 +301,7 @@ async def test_selecting_album_opens_tab_with_tracks(monkeypatch):
         view = screen.query_one("#album-songs", SongListView)
         assert view.display
         # Faixa indisponível é filtrada
-        assert [t["videoId"] for t in view.songs] == ["t1", "t2"]
+        assert [t.video_id for t in view.songs] == ["t1", "t2"]
 
         header = str(screen.query_one("#album-header", Static).render())
         assert "Álbum Teste" in header
@@ -344,11 +329,8 @@ async def test_focusing_list_highlights_first_item_for_enter(monkeypatch):
             ytmusic,
             "search_catalog",
             lambda *args, **kwargs: SearchResult(
-                tracks=[_song("v1", "Música 1")],
-                artists=[],
-                albums=[_album_item()],
-                playlists=[],
-                videos=[],
+                tracks=(_song("v1", "Música 1"),),
+                albums=(_album_item(),),
             ),
         )
         monkeypatch.setattr(ytmusic, "get_album", _album_details)
@@ -386,9 +368,7 @@ async def test_clicking_album_result_opens_album(monkeypatch):
         monkeypatch.setattr(
             ytmusic,
             "search_catalog",
-            lambda *args, **kwargs: SearchResult(
-                tracks=[], artists=[], albums=[_album_item()], playlists=[], videos=[]
-            ),
+            lambda *args, **kwargs: SearchResult(albums=(_album_item(),)),
         )
         monkeypatch.setattr(ytmusic, "get_album", _album_details)
         await screen.perform_search("álbum teste")

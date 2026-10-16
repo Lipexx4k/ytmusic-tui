@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -25,7 +25,8 @@ from textual.widgets import (
     TabPane,
 )
 
-from ytmusic_tui.api import SearchResult, ytmusic
+from ytmusic_tui.api import ytmusic
+from ytmusic_tui.api.models import Album, AlbumDetail, SearchResult, Track
 from ytmusic_tui.config import MAX_DOWNLOAD_CONCURRENT, MIN_DOWNLOAD_CONCURRENT, settings
 from ytmusic_tui.diagnostics import mask_diagnostics
 from ytmusic_tui.download import download_manager
@@ -40,17 +41,6 @@ from ytmusic_tui.tui.widgets import (
     SongListView,
     TrackListView,
 )
-
-
-def _album_artist_text(album: dict) -> str:
-    """Nome(s) do(s) artista(s) de um álbum (item de busca ou get_album)."""
-    artists = album.get("artists")
-    if isinstance(artists, list):
-        names = [a.get("name", "") for a in artists if isinstance(a, dict)]
-        text = ", ".join(name for name in names if name)
-        if text:
-            return text
-    return str(album.get("artist") or "")
 
 
 class MainScreen(PlaybackController, DownloadController, LibraryController, Screen):
@@ -83,8 +73,8 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         self._play_queue: list[TrackInfo] = []
         self._play_index: int = -1
         self._last_auto_next: float = 0.0
-        # Álbum aberto na aba dedicada (dict do get_album); usado pelo "a".
-        self._current_album: dict | None = None
+        # Álbum aberto na aba dedicada (modelo interno do T10-R1); usado pelo "a".
+        self._current_album: AlbumDetail | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -239,16 +229,18 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         else:
             tab.add_class("-hidden")
 
-    def _render_album_header(self, album: dict) -> None:
+    def _render_album_header(self, album: Album | AlbumDetail) -> None:
         """Título da aba de álbum: nome, artista, ano e nº de faixas."""
         try:
             header = self.query_one("#album-header", Static)
         except Exception:
             return
-        title = album.get("title", "?")
-        artist = _album_artist_text(album)
-        year = str(album.get("year") or "")
-        count = album.get("trackCount") or len(album.get("tracks") or [])
+        title = album.title or "?"
+        artist = ", ".join(album.artists)
+        year = album.year
+        count = album.track_count
+        if count is None and isinstance(album, AlbumDetail):
+            count = len(album.tracks)
         parts = [part for part in (artist, year, f"{count} faixas" if count else "") if part]
         suffix = f" — {escape(' · '.join(parts))}" if parts else ""
         header.update(f"💿 [b]{escape(title)}[/b]{suffix}")
@@ -263,7 +255,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         if text:
             message.update(text)
 
-    def open_album(self, browse_id: str, album_item: dict | None = None) -> None:
+    def open_album(self, browse_id: str, album_item: Album | None = None) -> None:
         """Abre o álbum na aba dedicada e carrega as faixas em background."""
         if not browse_id:
             self._toast("Álbum sem identificador; não é possível abrir")
@@ -272,7 +264,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             # Cabeçalho imediato com os dados da busca; o get_album completa.
             self._render_album_header(album_item)
         self._render_album_message("Carregando álbum...")
-        self._set_album_tab_visible(True, (album_item or {}).get("title"))
+        self._set_album_tab_visible(True, album_item.title if album_item else None)
         self._switch_tab("tab-album")
         # exclusive=True: abrir outro álbum cancela a carga anterior.
         self.run_worker(self._load_album(browse_id), group="album", exclusive=True)
@@ -287,16 +279,12 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
             return
         self.display_album(details)
 
-    def display_album(self, album: dict) -> None:
+    def display_album(self, album: AlbumDetail) -> None:
         """Preenche a aba de álbum com cabeçalho e lista de faixas."""
         self._current_album = album
-        tracks = [
-            track
-            for track in (album.get("tracks") or [])
-            if track.get("videoId") and track.get("isAvailable", True)
-        ]
+        tracks = [track for track in album.tracks if track.video_id and track.is_available]
         self._render_album_header(album)
-        self._set_album_tab_visible(True, album.get("title") or "")
+        self._set_album_tab_visible(True, album.title)
         try:
             view = self.query_one("#album-songs", SongListView)
             button = self.query_one("#btn-download-album", Button)
@@ -442,7 +430,7 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         elif isinstance(view, AlbumListView):
             album = view.get_selected_album()
             if album:
-                self.open_album(album.get("browseId", ""), album)
+                self.open_album(album.browse_id, album)
         elif isinstance(view, TrackListView):
             track = view.get_selected_track()
             if track:
@@ -488,18 +476,18 @@ class MainScreen(PlaybackController, DownloadController, LibraryController, Scre
         message.display = True
         message.update(text)
 
-    def display_search_results(self, results: SearchResult | list[dict[str, Any]]) -> None:
+    def display_search_results(self, results: SearchResult | list[Track]) -> None:
         """Exibe resultados da busca: músicas e álbuns (in-place).
 
-        Aceita uma lista de músicas (compatibilidade) ou um ``SearchResult``.
+        Aceita uma lista de músicas (atalho de teste) ou um ``SearchResult``.
         """
         if isinstance(results, list):
             tracks, albums = list(results), []
         else:
-            tracks = list(getattr(results, "tracks", []) or [])
-            albums = list(getattr(results, "albums", []) or [])
-        tracks = [song for song in tracks if song.get("videoId")]
-        albums = [album for album in albums if album.get("browseId")]
+            tracks = list(results.tracks)
+            albums = list(results.albums)
+        tracks = [song for song in tracks if song.video_id]
+        albums = [album for album in albums if album.browse_id]
         if not tracks and not albums:
             self._render_search_message("Nenhum resultado encontrado.")
             return

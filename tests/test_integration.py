@@ -6,7 +6,8 @@ Para rodar (ex.: para conferir se o YouTube Music mudou algo que quebre o app):
 
 Eles não entram no CI: existem para checar, quando desejado, se o que os mocks
 prometem continua batendo com o serviço real (busca, álbuns e os campos que a
-TUI usa: ``videoId``, ``browseId`` e ``isAvailable``).
+TUI usa — desde o T10-R1, os modelos internos ``video_id``, ``browse_id`` e
+``is_available``).
 """
 
 import os
@@ -32,8 +33,8 @@ def test_search_catalog_real():
 
     assert result.tracks, "esperava músicas no resultado"
     assert result.albums, "esperava álbuns no resultado"
-    assert all(track.get("videoId") for track in result.tracks)
-    assert all(album.get("browseId") for album in result.albums)
+    assert all(track.video_id for track in result.tracks)
+    assert all(album.browse_id for album in result.albums)
 
 
 def test_get_album_real():
@@ -42,15 +43,11 @@ def test_get_album_real():
 
     result = ytmusic.search_catalog("my dear melancholy")
     album = next(
-        (a for a in result.albums if "Dear Melancholy" in (a.get("title") or "")),
+        (a for a in result.albums if "Dear Melancholy" in a.title),
         result.albums[0],
     )
-    details = ytmusic.get_album(album["browseId"])
+    details = ytmusic.get_album(album.browse_id)
 
-    assert details.get("title")
-    playable = [
-        track
-        for track in details.get("tracks", [])
-        if track.get("videoId") and track.get("isAvailable", True)
-    ]
+    assert details.title
+    playable = [track for track in details.tracks if track.video_id and track.is_available]
     assert playable, "esperava faixas disponíveis no álbum"

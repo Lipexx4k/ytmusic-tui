@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from textual.widgets import DataTable
 
+from ytmusic_tui.api.models import AlbumDetail
 from ytmusic_tui.download import DownloadStatus, DownloadTask, download_manager
 from ytmusic_tui.library import library
 from ytmusic_tui.player import TrackInfo, player
@@ -23,7 +24,7 @@ class DownloadController:
 
     # Estado e membros fornecidos pela tela host (o mypy analisa cada mixin
     # isoladamente; as declarações abaixo existem só na checagem de tipos).
-    _current_album: dict | None
+    _current_album: AlbumDetail | None
     if TYPE_CHECKING:
 
         def query_one(self, selector: Any, expect_type: Any = None) -> Any: ...
@@ -169,27 +170,23 @@ class DownloadController:
             return
         self._enqueue_download(track)
 
-    def download_album(self, album: dict) -> None:
+    def download_album(self, album: AlbumDetail) -> None:
         """Enfileira o download de todas as faixas do álbum.
 
         Faixas já baixadas (na biblioteca local) são puladas; um único toast
         resume o resultado em vez de um por faixa.
         """
-        tracks = [
-            track
-            for track in (album.get("tracks") or [])
-            if track.get("videoId") and track.get("isAvailable", True)
-        ]
+        tracks = [track for track in album.tracks if track.video_id and track.is_available]
         if not tracks:
             self._toast("Álbum sem faixas para baixar")
             return
 
-        album_title = album.get("title", "")
+        album_title = album.title
         queued = 0
         skipped = 0
         in_progress = 0
-        for track_data in tracks:
-            info = self._track_info_from_song(track_data)
+        for track in tracks:
+            info = self._track_info_from_song(track)
             if not info.video_id:
                 continue
             if not info.album:

@@ -4,14 +4,15 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ytmusic_tui.api.models import Track
 from ytmusic_tui.config import settings
 from ytmusic_tui.library.errors import AudioFileMissingError, describe_library_error
-from ytmusic_tui.library.models import Track
+from ytmusic_tui.library.models import Track as LibraryTrack
 from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.widgets import SongListView, TrackListView
 
 
-def ensure_audio_file(track: Track) -> None:
+def ensure_audio_file(track: LibraryTrack) -> None:
     """Confere que o arquivo registrado da faixa existe no disco (T05-R4).
 
     Só vale para faixa com arquivo registrado (``is_downloaded`` e
@@ -60,31 +61,20 @@ class PlaybackController:
     # ===== Conversões para TrackInfo =====
 
     @staticmethod
-    def _track_info_from_song(song: dict) -> TrackInfo:
-        """Converte um resultado de busca (ou faixa de álbum) em TrackInfo."""
-        artists = ", ".join(a.get("name", "") for a in (song.get("artists") or []))
-        album = ""
-        album_data = song.get("album")
-        if isinstance(album_data, dict):
-            album = album_data.get("name", "")
-        elif isinstance(album_data, str):
-            # Faixas de get_album trazem o nome do álbum como string.
-            album = album_data
-        thumbnails = song.get("thumbnails") or []
-        thumbnail = thumbnails[-1].get("url", "") if thumbnails else ""
-        video_id = song.get("videoId", "")
+    def _track_info_from_song(song: Track) -> TrackInfo:
+        """Converte a faixa interna da API (T10-R1) no TrackInfo do player."""
         return TrackInfo(
-            video_id=video_id,
-            title=song.get("title", ""),
-            artist=artists,
-            album=album,
-            duration=float(song.get("duration_seconds") or 0),
-            thumbnail_url=thumbnail,
-            source_url=f"https://music.youtube.com/watch?v={video_id}",
+            video_id=song.video_id,
+            title=song.title,
+            artist=", ".join(song.artists),
+            album=song.album_name,
+            duration=float(song.duration_seconds or 0),
+            thumbnail_url=song.thumbnail_url,
+            source_url=f"https://music.youtube.com/watch?v={song.video_id}",
         )
 
     @staticmethod
-    def _track_info_from_library(track: Track) -> TrackInfo:
+    def _track_info_from_library(track: LibraryTrack) -> TrackInfo:
         """Converte uma faixa da biblioteca em TrackInfo."""
         if track.is_downloaded and track.local_path:
             source_url = str(track.local_path)
@@ -100,7 +90,7 @@ class PlaybackController:
 
     # ===== Fila de reprodução =====
 
-    def play_song(self, song: dict, view_id: str = "search-songs") -> None:
+    def play_song(self, song: Track, view_id: str = "search-songs") -> None:
         """Reproduz uma música vinda da API (resultado de busca ou álbum)."""
         info = self._track_info_from_song(song)
         if not info.video_id:
@@ -113,7 +103,7 @@ class PlaybackController:
         self._play_index = index if 0 <= index < len(self._play_queue) else 0
         self._start_playback(info)
 
-    def play_library_track(self, track: Track) -> None:
+    def play_library_track(self, track: LibraryTrack) -> None:
         """Reproduz uma faixa da biblioteca local.
 
         Arquivo registrado que sumiu do disco vira toast específico

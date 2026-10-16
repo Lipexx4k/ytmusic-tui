@@ -7,7 +7,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Input, Label, ListItem, ListView, ProgressBar, Static
 
-from ytmusic_tui.library.models import Track
+from ytmusic_tui.api.models import Album, Track
+from ytmusic_tui.library.models import Track as LibraryTrack
 from ytmusic_tui.player import PlayerState, TrackInfo
 
 
@@ -26,12 +27,12 @@ class AutoHighlightListView(ListView):
 class TrackListView(AutoHighlightListView):
     """Lista de faixas da biblioteca local."""
 
-    def __init__(self, tracks: list[Track] | None = None, **kwargs: Any) -> None:
+    def __init__(self, tracks: list[LibraryTrack] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.tracks: list[Track] = []
+        self.tracks: list[LibraryTrack] = []
         self.set_tracks(tracks or [])
 
-    def set_tracks(self, tracks: list[Track]) -> None:
+    def set_tracks(self, tracks: list[LibraryTrack]) -> None:
         """Atualiza a lista sem remontar o widget (evita ``DuplicateIds``).
 
         Os itens são recriados in-place; por isso não usam ``id``.
@@ -43,7 +44,7 @@ class TrackListView(AutoHighlightListView):
             label = f"{track.title} — {artists}" if artists else track.title
             self.append(ListItem(Label(label, markup=False)))
 
-    def get_selected_track(self) -> Track | None:
+    def get_selected_track(self) -> LibraryTrack | None:
         """Retorna faixa selecionada."""
         if self.index is not None and 0 <= self.index < len(self.tracks):
             return self.tracks[self.index]
@@ -58,65 +59,59 @@ class SearchInput(Input):
 
 
 class SongListView(AutoHighlightListView):
-    """Lista de resultados de busca (dicionários crus da API)."""
+    """Lista de músicas (resultados de busca ou faixas de álbum)."""
 
-    def __init__(self, songs: list[dict] | None = None, **kwargs: Any) -> None:
+    def __init__(self, songs: list[Track] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.songs: list[dict] = []
+        self.songs: list[Track] = []
         self.set_songs(songs or [])
 
-    def set_songs(self, songs: list[dict]) -> None:
+    def set_songs(self, songs: list[Track]) -> None:
         """Atualiza os resultados exibidos (in-place, sem ``id`` nos itens)."""
         self.songs = list(songs)
         self.clear()
         for song in self.songs:
-            artists = ", ".join(a.get("name", "") for a in (song.get("artists") or []))
-            title = song.get("title", "?")
-            label = f"{title} — {artists}" if artists else title
-            duration = song.get("duration", "")
-            if duration:
-                label += f"  ({duration})"
+            artists = ", ".join(song.artists)
+            label = f"{song.title} — {artists}" if artists else song.title
+            if song.duration_text:
+                label += f"  ({song.duration_text})"
             # markup=False: títulos reais contêm [colchetes] que o Rich
             # interpretaria como marcação (texto sumia ou quebrava).
             self.append(ListItem(Label(label, markup=False)))
 
-    def get_selected_song(self) -> dict | None:
-        """Retorna o dicionário da música selecionada."""
+    def get_selected_song(self) -> Track | None:
+        """Retorna a música selecionada (modelo interno do T10-R1)."""
         if self.index is not None and 0 <= self.index < len(self.songs):
             return self.songs[self.index]
         return None
 
 
 class AlbumListView(AutoHighlightListView):
-    """Lista de álbuns (dicionários crus da API de busca)."""
+    """Lista de álbuns (itens de busca)."""
 
-    def __init__(self, albums: list[dict] | None = None, **kwargs: Any) -> None:
+    def __init__(self, albums: list[Album] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.albums: list[dict] = []
+        self.albums: list[Album] = []
         self.set_albums(albums or [])
 
-    def set_albums(self, albums: list[dict]) -> None:
+    def set_albums(self, albums: list[Album]) -> None:
         """Atualiza a lista exibida (in-place, sem ``id`` nos itens)."""
         self.albums = list(albums)
         self.clear()
         for album in self.albums:
-            artists = ", ".join(
-                a.get("name", "") for a in (album.get("artists") or []) if isinstance(a, dict)
-            )
-            title = album.get("title", "?")
-            kind = album.get("type") or "Álbum"
-            year = str(album.get("year") or "")
-            label = f"💿 {title}"
+            artists = ", ".join(album.artists)
+            kind = album.kind or "Álbum"
+            label = f"💿 {album.title}"
             if artists:
                 label += f" — {artists}"
-            meta = ", ".join(part for part in (kind, year) if part)
+            meta = ", ".join(part for part in (kind, album.year) if part)
             label += f"  ({meta})"
             # markup=False: títulos reais contêm [colchetes] que o Rich
             # interpretaria como marcação.
             self.append(ListItem(Label(label, markup=False)))
 
-    def get_selected_album(self) -> dict | None:
-        """Retorna o dicionário do álbum selecionado."""
+    def get_selected_album(self) -> Album | None:
+        """Retorna o álbum selecionado (modelo interno do T10-R1)."""
         if self.index is not None and 0 <= self.index < len(self.albums):
             return self.albums[self.index]
         return None

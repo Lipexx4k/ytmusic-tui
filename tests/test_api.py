@@ -1,9 +1,20 @@
-"""Testes para o wrapper da API em modo anônimo (sem login)."""
+"""Testes do wrapper da API (fronteira tipada do T10-R1).
+
+O transporte é sempre falso (sem rede): prova-se aqui a forma da saída
+(modelos internos, nunca dict cru do ytmusicapi), a validação de forma do
+T08 (lista/dict, mensagens preservadas) e a regra de fronteira — nenhum
+módulo acima de ``api/`` importa ytmusicapi (teste de fonte, A5).
+"""
+
+import re
+from pathlib import Path
 
 import pytest
 
+import ytmusic_tui
 import ytmusic_tui.api as api_module
 from ytmusic_tui.api import SearchResult, YTMusicAPI
+from ytmusic_tui.api.models import Album, AlbumDetail, Track
 from ytmusic_tui.errors import InvalidResponseError
 
 
@@ -29,8 +40,17 @@ class _FakeYTMusic:
             item["browseId"] = f"MPREb-{query}"
         return [item]
 
-    def get_song(self, video_id):
-        return {"videoId": video_id}
+    def get_album(self, browse_id):
+        return {
+            "browseId": browse_id,
+            "title": "Álbum teste",
+            "artists": [{"name": "Artista"}],
+            "year": "2020",
+            "trackCount": 1,
+            "tracks": [
+                {"videoId": "t1", "title": "Faixa", "artists": [{"name": "Artista"}]},
+            ],
+        }
 
 
 @pytest.fixture
@@ -42,7 +62,7 @@ def test_initialize_anonymous_returns_true(fake_ytmusic):
     """Sem credenciais, o cliente é criado anônimo e inicializado."""
     api = YTMusicAPI()
     assert api.initialize() is True
-    assert isinstance(api.client, _FakeYTMusic)
+    assert isinstance(api._require_client(), _FakeYTMusic)
 
     # reentrância: já inicializado
     assert api.initialize() is True
@@ -62,7 +82,7 @@ def test_client_requires_initialize(monkeypatch):
     assert api.initialize() is False
 
     with pytest.raises(RuntimeError):
-        _ = api.client
+        api._require_client()
 
 
 def test_initialize_failure_returns_false(monkeypatch):
@@ -77,33 +97,68 @@ def test_initialize_failure_returns_false(monkeypatch):
     assert api._client is None
 
 
-def test_search_catalog_parallel_songs_and_albums(fake_ytmusic):
-    """search_catalog busca músicas e álbuns (2 requisições) e filtra por tipo."""
+def test_search_catalog_parallel_songs_and_albums_typed(fake_ytmusic):
+    """search_catalog devolve modelos internos (dict cru não sai da api/)."""
     api = YTMusicAPI()
     assert api.initialize() is True
 
     result = api.search_catalog("coldplay", songs_limit=5, albums_limit=3)
 
     assert isinstance(result, SearchResult)
-    assert len(result.tracks) == 1 and result.tracks[0]["resultType"] == "song"
-    assert result.tracks[0]["videoId"] == "vid-coldplay"
-    assert len(result.albums) == 1 and result.albums[0]["resultType"] == "album"
-    assert result.albums[0]["browseId"] == "MPREb-coldplay"
-    assert result.artists == [] and result.playlists == [] and result.videos == []
-    assert sorted(api.client.searches) == ["albums", "songs"]
+    assert len(result.tracks) == 1
+    track = result.tracks[0]
+    assert isinstance(track, Track)
+    assert track.video_id == "vid-coldplay"
+    assert track.title == "songs-coldplay"
+    # Ausente é explícito: o fake não manda artistas/duração.
+    assert track.artists == ()
+    assert track.duration_seconds is None
+
+    assert len(result.albums) == 1
+    album = result.albums[0]
+    assert isinstance(album, Album)
+    assert album.browse_id == "MPREb-coldplay"
+    assert album.title == "albums-coldplay"
+
+    assert sorted(api._require_client().searches) == ["albums", "songs"]
 
 
-def test_methods_delegate_to_client(fake_ytmusic):
-    """Métodos pontuais delegam para o cliente subjacente."""
+def test_get_album_returns_typed_detail(fake_ytmusic):
+    """get_album devolve AlbumDetail com faixas tipadas (T10-R1)."""
     api = YTMusicAPI()
     api.initialize()
 
-    assert api.get_song("X") == {"videoId": "X"}
+    details = api.get_album("MPREb-1")
+
+    assert isinstance(details, AlbumDetail)
+    assert details.browse_id == "MPREb-1"
+    assert details.title == "Álbum teste"
+    assert details.track_count == 1
+    assert [t.video_id for t in details.tracks] == ["t1"]
+
+
+def test_get_stream_url_continua_sendo_o_unico_montador_publico():
+    """Q-A: get_stream_url fica (seam documentado para o T11)."""
+    api = YTMusicAPI()
     assert api.get_stream_url("X") == "https://music.youtube.com/watch?v=X"
 
-    results = api.search("coldplay", filter="songs", limit=3)
-    assert results[0]["resultType"] == "song"
-    assert results[0]["title"] == "songs-coldplay"
+
+def test_metodos_sem_consumidor_removidos():
+    """Q-A: os 8 métodos mortos saíram da superfície pública (T10-R1)."""
+    for name in (
+        "search",
+        "get_song",
+        "get_artist",
+        "get_playlist",
+        "get_watch_playlist",
+        "get_home",
+        "get_mood_categories",
+        "get_mood_playlists",
+    ):
+        assert not hasattr(YTMusicAPI, name), name
+
+
+# ===== validação de forma da busca (T08 · §10.1, movida p/ api/adapt) =====
 
 
 def _client_factory(songs: object, albums: object):
@@ -147,6 +202,55 @@ def test_search_catalog_rejects_non_dict_item(monkeypatch):
 
     with pytest.raises(InvalidResponseError, match="esperado dict, recebido str"):
         api.search_catalog("q")
+
+
+def test_get_album_rejects_non_dict(monkeypatch):
+    """get_album fora do contrato (lista) → InvalidResponseError (T10-R1)."""
+
+    class _BadAlbumClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def get_album(self, browse_id):
+            return [{"videoId": "x"}]
+
+    monkeypatch.setattr(api_module, "YTMusic", _BadAlbumClient)
+    api = YTMusicAPI()
+    api.initialize()
+
+    with pytest.raises(InvalidResponseError, match="esperado dict, recebido list"):
+        api.get_album("MPREb-x")
+
+
+# ===== fronteira "nada de ytmusicapi acima de api/" (R1; A5) =====
+
+#: Import de ytmusicapi (com subpacote) — NÃO casa "ytmusic_tui" nem o
+#: singleton ``ytmusic`` (A5: a regra de fonte não pode pegá-los de tabela).
+_YT_MUSICAPI_IMPORT = re.compile(
+    r"^\s*(?:import\s+ytmusicapi\b|from\s+ytmusicapi(?:\.|\s|$))", re.MULTILINE
+)
+
+
+def test_fronteira_ytmusicapi_so_no_pacote_api():
+    """Só módulos dentro de ``api/`` importam ytmusicapi (R1; A5)."""
+    src = Path(ytmusic_tui.__file__).parent
+    violations = []
+    for path in sorted(src.rglob("*.py")):
+        if path.parent == src / "api":
+            continue
+        if _YT_MUSICAPI_IMPORT.search(path.read_text(encoding="utf-8")):
+            violations.append(str(path.relative_to(src)))
+
+    assert violations == [], f"módulos fora de api/ importando ytmusicapi: {violations}"
+
+    # Auto-prova do regex (A5): o singleton do projeto e os imports internos
+    # não casam; o import/from de ytmusicapi (com subpacote) casam.
+    assert not _YT_MUSICAPI_IMPORT.search("from ytmusic_tui.api import ytmusic\n")
+    assert not _YT_MUSICAPI_IMPORT.search("from ytmusic_tui.api.models import Track\n")
+    assert not _YT_MUSICAPI_IMPORT.search("import ytmusic_tui\n")
+    assert _YT_MUSICAPI_IMPORT.search("from ytmusicapi import YTMusic\n")
+    assert _YT_MUSICAPI_IMPORT.search("from ytmusicapi.exceptions import YTMusicError\n")
+    assert _YT_MUSICAPI_IMPORT.search("    import ytmusicapi\n")
 
 
 if __name__ == "__main__":
