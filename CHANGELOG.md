@@ -52,6 +52,10 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 - Aviso ao tocar uma faixa cujo arquivo registrado não está mais no disco
   (em vez de mandar o player abrir um caminho inexistente); a reconciliação
   marca a faixa como ausente na passagem seguinte
+- README: seção **"Versões conhecidas boas"** (Python 3.11–3.13, mpv/libmpv,
+  ffmpeg e yt-dlp validados, com comandos de checagem) e subseção
+  **"Releases e atualizações"** (release = commit + versão + CI verde, manual;
+  fluxo Dependabot → PR → CI → merge) (T07)
 
 ### Alterado
 
@@ -68,6 +72,15 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   permissão, esquema incompatível, corrompido): a mensagem mostrada diz o
   caso real e a inicialização do app nunca cria/derruba tabelas em
   silêncio — e falha de banco não derruba o app
+- Desenvolvimento/CI agora usam lockfile (`uv.lock`, uv): as versões exatas
+  de runtime + dev ficam travadas num resolve único que cobre Python
+  3.11–3.13, e o CI instala dele — falha se `pyproject.toml` e lock
+  divergirem; contribuir sem uv continua possível via
+  `pip install -e ".[dev]"` (sem lockfile) (T07)
+- Auditar dependências passou a ser sobre o **conjunto travado** do
+  lockfile (`uv export` → `pip-audit -r`) em vez do ambiente flutuante (T07)
+- Dependabot migra para o ecossistema `uv`: atualiza `uv.lock` e
+  `pyproject.toml` juntos (grupos dev/runtime mantidos) (T07)
 
 ### Corrigido
 

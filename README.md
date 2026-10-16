@@ -126,6 +126,19 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 | **Windows (WSL2)** | 🟡 Não testado — funciona dentro do WSL seguindo as instruções de Linux |
 | **Windows (nativo)** | ❌ Não suportado oficialmente — exigiria configurar a DLL da libmpv manualmente |
 
+## ✅ Versões conhecidas boas
+
+Combinações validadas (o conjunto exato de dependências Python usado no CI está no [`uv.lock`](uv.lock); os pisos, no `pyproject.toml`):
+
+| Componente | Versão validada | Como conferir |
+|---|---|---|
+| **Python** | 3.11–3.13 (CI roda em 3.11 e 3.13; desenvolvimento do autor em 3.13.5) | `python3 --version` |
+| **mpv / libmpv** | mpv 0.40.0 com libmpv.so.2 (LMDE 7 / Debian 13) | `mpv --version \| head -n1` · `ldconfig -p \| grep libmpv` |
+| **ffmpeg** | 7.1.5 (Debian 13) | `ffmpeg -version \| head -n1` |
+| **yt-dlp** | piso `>=2024.1.0` no pyproject; 2026.8.19 no ambiente do autor | `yt-dlp --version` · no venv: `python -c "import yt_dlp; print(yt_dlp.version.__version__)"` |
+
+O **yt-dlp** muda com frequência (o YouTube muda as regras do jogo): mantenha-o atualizado — o Dependabot já abre PR semanal e uma atualização que quebre a reprodução aparece no CI antes do merge.
+
 ## 📦 Instalação
 
 ### 1. Dependências do sistema
@@ -319,8 +332,7 @@ ytmusic-tui/
 ```bash
 git clone https://github.com/Lipexx4k/ytmusic-tui
 cd ytmusic-tui
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+uv sync --locked --extra dev    # cria/atualiza o .venv a partir do uv.lock
 
 # Testes (offline, tudo com mocks)
 .venv/bin/python -m pytest tests/ -q
@@ -334,19 +346,24 @@ python3 -m venv .venv
 # Testes de integração (falam com o YouTube Music de verdade; desabilitados por padrão)
 YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
 
-# Auditoria de vulnerabilidades das dependências (também roda no CI)
-.venv/bin/pip-audit --skip-editable
+# Auditoria de vulnerabilidades do conjunto travado (o mesmo que o CI audita)
+uv export --frozen --no-emit-project --extra dev --no-hashes -o /tmp/ytm-locked.txt
+.venv/bin/pip-audit -r /tmp/ytm-locked.txt
 ```
+
+O **[uv](https://docs.astral.sh/uv/)** é a ferramenta de desenvolvimento/CI: o `uv.lock` fixa as versões exatas de runtime + dev e o CI instala dele (`uv sync --locked`). Se `pyproject.toml` e `uv.lock` divergirem, o `--locked` falha de propósito — depois de editar dependências, rode `uv lock`. Sem uv? `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` continua funcionando (sem o lockfile — é o CI que o usa).
 
 Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca — **nenhum teste da suíte padrão toca a rede ou o player de verdade**; os de integração são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo.
 
-O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, além de um job de `pip-audit` que falha se alguma dependência tiver vulnerabilidade conhecida.
+O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, **instalando do `uv.lock`** (`uv sync --locked` — o job falha se o lock estiver ausente ou fora de sincronia com o `pyproject.toml`), um job de segurança que exporta o conjunto travado e roda `pip-audit` (falha em vulnerabilidade conhecida) e um job de pacote que confere o conteúdo do wheel/sdist e instala o wheel num ambiente limpo.
 
-As dependências são atualizadas pelo **Dependabot** (PRs semanais): o CI roda em cada PR, então
-uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende
-de serviços externos que mudam com frequência (YouTube, mpv, yt-dlp).
+As dependências são atualizadas pelo **Dependabot** (PRs semanais, grupos dev/runtime — com o lockfile, ele atualiza `uv.lock` e `pyproject.toml` juntos): o CI roda em cada PR, então uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende de serviços externos que mudam com frequência (YouTube, mpv, yt-dlp).
 
-**Ambiente de desenvolvimento/teste do autor** (LMDE 7): Python 3.13.5 · mpv 0.40.0 (libmpv) · ffmpeg 7.1.5 · textual 8.2.8 · ytmusicapi 1.12.3 · yt-dlp 2026.8.19 · SQLAlchemy 2.1.4.
+### Releases e atualizações
+
+Cada release corresponde a um **commit rastreável** com versão no `pyproject.toml` e entrada no `CHANGELOG.md`, tag anotada (`vX.Y.Z`) e **CI verde no commit** (ex.: `v0.1.2` → commit `84b6d80`). As releases são **manuais** — nada é publicado automaticamente; hashes (SHA-256) dos artefatos e a automação do processo entram numa etapa futura.
+
+Atualizações de dependência seguem um caminho único: **Dependabot abre o PR → CI obrigatório (3.11/3.13 + lockfile + pip-audit + pacote) → merge manual**. Merge não é release: nenhuma atualização vai direto para uma release estável.
 
 ## 🗺️ Roadmap
 
