@@ -69,6 +69,35 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   caso real e a inicialização do app nunca cria/derruba tabelas em
   silêncio — e falha de banco não derruba o app
 
+### Segurança
+
+- Endurecimento geral (T06): o caminho de cada download é normalizado uma
+  única vez e o destino é contido dentro de `download_dir` **depois** de
+  resolver symlinks e `..` — nada é criado, baixado ou publicado fora da
+  pasta de mídia, nem com entrada hostil, banco adulterado ou colisão entre
+  tarefas
+- yt-dlp com limites de rede (T06): timeout de socket de 30 s e 3
+  retentativas (3 para fragmentos) — stream travado vira falha clara em vez
+  de download pendurado para sempre
+- yt-dlp ou ffmpeg ausente vira falha da tarefa com o que instalar (T06); o
+  app avisa uma vez por execução quando só o yt-dlp falta, e o ffmpeg só é
+  exigido na hora do download
+- Ciclo de vida do mpv explícito (T06): `start`/`shutdown` idempotentes,
+  falha ao iniciar vira estado de erro na TUI (nunca exceção solta) e
+  `LC_NUMERIC=C` é fixado ao criar cada instância
+- Permissões privadas para dados e trabalho (T06): diretórios internos
+  (config, dados, cache, log, backups, `.tmp`, `.quarantine`) nascem 0700 e
+  arquivos (banco + sidecars, backups, log rotacionado, `config.toml`) 0600
+  **mesmo com `umask 0`**; o que já existe só é apertado (nunca afrouxado),
+  com registro no log — e `download_dir` é mídia do usuário, nunca é
+  chmodado
+- Mensagens de erro (yt-dlp, mpv, banco) exibidas na TUI são mascaradas
+  (T06): HOME vira `~` e URLs perdem query/credenciais — o log preserva o
+  detalhe cru
+- `set_concurrent` valida o valor recebido (tipo e faixa 1–10) em vez de
+  ajustar em silêncio (T06); a aba Config normaliza antes de aplicar e avisa
+  em caso de valor inválido
+
 ## [0.1.2] - 2026-10-15
 
 ### Adicionado
