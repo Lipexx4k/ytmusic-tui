@@ -69,6 +69,15 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   caso real e a inicialização do app nunca cria/derruba tabelas em
   silêncio — e falha de banco não derruba o app
 
+### Corrigido
+
+- Instalação limpa do wheel/sdist não incluía `tui/app.tcss` (único arquivo
+  não-`.py` de runtime do pacote): o app morria no startup com
+  `StylesheetError` — o CSS passa a ser empacotado explicitamente, o job
+  "pacote" do CI confere o conteúdo do artefato (wheel e sdist) antes de
+  instalar e uma guarda de fonte garante o arquivo ao lado de `app.py`
+  (T06.1)
+
 ### Segurança
 
 - Endurecimento geral (T06): o caminho de cada download é normalizado uma
