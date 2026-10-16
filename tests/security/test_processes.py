@@ -20,6 +20,7 @@ Checklist coberta aqui:
 
 import ast
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -244,6 +245,56 @@ def test_stalled_network_is_bounded_and_fails_cleanly(security_env, monkeypatch,
     assert not list(env.download_dir.rglob("*.mp3"))  # nada publicado
     temp_dir = env.download_dir / ".tmp"
     assert not temp_dir.exists() or list(temp_dir.iterdir()) == []  # sem sobras
+
+
+def test_real_libmpv_lifecycle_leaves_no_process_behind(monkeypatch):
+    """R3: com libmpv de verdade, start/shutdown não deixam processo para trás.
+
+    O app usa libmpv EM PROCESSO (não o binário ``mpv``); o único processo
+    que o player pode lançar é o yt-dlp do hook ytdl, e só ao tocar stream.
+    O teste cria e encerra o handle duas vezes (prova o reinício) e exige
+    que nenhum processo novo com "mpv"/"yt-dlp" no cmdline apareça.
+    """
+    pytest.importorskip("mpv")
+    if sys.platform != "linux":
+        pytest.skip("varredura de /proc exige Linux")
+
+    from ytmusic_tui.player import MPVPlayer
+
+    player_mod = sys.modules["ytmusic_tui.player"]
+    monkeypatch.setattr(player_mod.settings, "mpv_volume", 20)
+    monkeypatch.setattr(player_mod.settings, "mpv_audio_quality", "low")
+    monkeypatch.setattr(MPVPlayer, "_find_yt_dlp", staticmethod(lambda: None))
+
+    def snapshot() -> set[str]:
+        found: set[str] = set()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                cmdline = (entry / "cmdline").read_text(errors="ignore")
+            except OSError:
+                continue
+            if "mpv" in cmdline or "yt-dlp" in cmdline:
+                found.add(entry.name)
+        return found
+
+    before = snapshot()
+    player = MPVPlayer()
+    try:
+        if not player.start():
+            pytest.skip("libmpv indisponível neste ambiente")
+        assert player._mpv is not None
+
+        player.shutdown()
+        assert player._mpv is None
+
+        assert player.start() is True  # reinício após shutdown (R3)
+        assert player._mpv is not None
+    finally:
+        player.shutdown()
+
+    assert snapshot() - before == set()
 
 
 def test_download_error_midway_fails_cleanly_without_partial(make_security_env, tmp_path):

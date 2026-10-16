@@ -2,6 +2,7 @@
 
 import contextlib
 import locale
+import logging
 import shutil
 import sys
 import time
@@ -14,6 +15,8 @@ from typing import Any
 import mpv
 
 from ytmusic_tui.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class PlayerState(Enum):
@@ -64,6 +67,7 @@ class MPVPlayer:
         self._callbacks: list[Callable[[PlayerEvent], None]] = []
         self._observers_started = False
         self._last_position_emit = 0.0
+        self._warned_missing_yt_dlp = False
         self.last_event_error: str | None = None
 
     def _ensure_mpv_started(self) -> None:
@@ -89,6 +93,16 @@ class MPVPlayer:
         yt_dlp_path = self._find_yt_dlp()
         if yt_dlp_path:
             player_kwargs["script_opts"] = f"ytdl_hook-ytdl_path={yt_dlp_path}"
+        elif not self._warned_missing_yt_dlp:
+            # Aviso ÚNICO (T06/§8.4): sem yt-dlp, o mpv cai no hook embutido
+            # (antigo) e streams do YouTube falham; não faz sentido repetir o
+            # aviso a cada reinício do handle.
+            self._warned_missing_yt_dlp = True
+            logger.warning(
+                "yt-dlp não encontrado (nem ao lado de %s, nem no PATH): o mpv "
+                "usará o hook embutido, que costuma falhar em streams do YouTube",
+                Path(sys.executable).parent,
+            )
 
         # IMPORTANTE: o ytmusicapi muda o locale (LC_ALL) para en_US.UTF-8 no
         # construtor do YTMusic. O libmpv exige LC_NUMERIC="C" — qualquer outro
@@ -101,6 +115,26 @@ class MPVPlayer:
         # Configurar observadores
         self._setup_observers()
         self._observers_started = True
+
+    def start(self) -> bool:
+        """Inicializa o handle do mpv (idempotente) — lifecycle explícito (R3).
+
+        Devolve ``True`` quando o handle está disponível. Falha ao criar o
+        handle (libmpv ausente, init recusado) vira estado ERROR + evento
+        ``error`` (a UI mostra um toast) e ``False`` — nunca uma exceção do
+        mpv subindo para o loop da TUI. ``shutdown()`` é o encerramento
+        explícito; depois dele, um novo ``start()`` cria um handle novo.
+        """
+        if self._mpv is not None:
+            return True
+        try:
+            self._ensure_mpv_started()
+        except Exception as e:
+            logger.exception("Falha ao iniciar o mpv")
+            self._state = PlayerState.ERROR
+            self._emit("error", {"message": f"mpv indisponível: {e}"})
+            return False
+        return True
 
     def _ytdl_format(self) -> str:
         """Formato de stream do yt-dlp conforme a qualidade configurada."""
@@ -218,9 +252,9 @@ class MPVPlayer:
         return self._current_track
 
     def play(self, track_info: TrackInfo) -> bool:
-        """Inicia reprodução de uma faixa."""
-        self._ensure_mpv_started()
-
+        """Inicia reprodução de uma faixa (início do mpv sob demanda)."""
+        if not self.start():
+            return False
         if not self._mpv:
             return False
 
@@ -305,11 +339,12 @@ class MPVPlayer:
         return None
 
     def shutdown(self) -> None:
-        """Encerra player completamente."""
+        """Encerra player completamente (idempotente; permite novo ``start``)."""
         if self._mpv:
             with contextlib.suppress(Exception):
                 self._mpv.terminate()
             self._mpv = None
+        self._observers_started = False
         self._state = PlayerState.STOPPED
         self._current_track = None
 
