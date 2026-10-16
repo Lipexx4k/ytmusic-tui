@@ -44,6 +44,7 @@ from ytmusic_tui.download.errors import (
     PathEscapeError,
     PipelineError,
 )
+from ytmusic_tui.permissions import secure_directory
 
 __all__ = [
     "FALLBACK_ALBUM",
@@ -253,7 +254,9 @@ def reserve(final_path: Path, download_dir: Path) -> Reservation:
     de reservas antigas é da reconciliação, por idade).
     """
     temp_dir = download_dir / TMP_DIR_NAME
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    # §8.3/T06: pasta de trabalho 0700 (existente só aperta). O download_dir
+    # em si é mídia do usuário e NUNCA é chmodado.
+    secure_directory(temp_dir, label="diretório de trabalho (.tmp)")
     key = reservation_key(final_path)
     lock_path = temp_dir / f"{key}.reserva"
     try:

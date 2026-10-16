@@ -14,6 +14,9 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+from ytmusic_tui.errors import ConfigError
+from ytmusic_tui.permissions import secure_directory, secure_file
+
 # Caminho padrão do arquivo de configuração TOML.
 # É calculado independentemente da instância para evitar dependência circular
 # (config_dir é uma das configurações carregadas do próprio arquivo).
@@ -140,11 +143,19 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        # Garantir que diretórios existam
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.download_dir.mkdir(parents=True, exist_ok=True)
+        # Diretórios internos da aplicação (§8.3/T06): 0700 estrito (chmod
+        # pós-mkdir, umask-agnóstico); existente só aperta, com log.
+        secure_directory(self.config_dir, label="diretório de configuração")
+        secure_directory(self.data_dir, label="diretório de dados")
+        secure_directory(self.cache_dir, label="diretório de cache")
+        # download_dir é MÍDIA DO USUÁRIO: criado como sempre (modo padrão do
+        # sistema), nunca chmodado — quem decide como compartilhar é o usuário.
+        try:
+            self.download_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConfigError(
+                f"não foi possível criar o diretório de downloads {self.download_dir}: {exc}"
+            ) from exc
 
     @property
     def library_db_path(self) -> Path:
@@ -179,8 +190,10 @@ class Settings(BaseSettings):
         for key, value in updates.items():
             data[key] = str(value) if isinstance(value, Path) else value
         lines = [f"{key} = {_toml_literal(value)}" for key, value in data.items()]
-        path.parent.mkdir(parents=True, exist_ok=True)
+        secure_directory(path.parent, label="diretório de configuração")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # §8.3/T06: o TOML é dado do usuário — 0600 (aperta existente).
+        secure_file(path, label="arquivo de configuração")
 
 
 # Instância global de configurações

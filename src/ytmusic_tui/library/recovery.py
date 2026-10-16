@@ -41,6 +41,7 @@ from ytmusic_tui.download.pipeline import (
 )
 from ytmusic_tui.download.store import DownloadTaskStore, PendingTaskFiles
 from ytmusic_tui.library.service import LibraryService, library
+from ytmusic_tui.permissions import secure_directory
 
 logger = logging.getLogger(__name__)
 
@@ -267,14 +268,8 @@ def _import_file(service: LibraryService, download_dir: Path, path: Path) -> Non
 def _quarantine(download_dir: Path, path: Path) -> Path:
     """Move um arquivo inválido para ``.quarantine`` (0700), sem colisão."""
     quarantine_dir = download_dir / QUARANTINE_DIR_NAME
-    quarantine_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        # mkdir respeita umask; o chmod garante 0700 também se já existia.
-        os.chmod(quarantine_dir, 0o700)
-    except OSError:
-        logger.warning(
-            "Não foi possível ajustar o modo de %s para 0700", quarantine_dir, exc_info=True
-        )
+    # §8.3/T06: pasta de trabalho privada (0700 estrito; existente só aperta).
+    secure_directory(quarantine_dir, label="diretório de quarentena")
 
     target = quarantine_dir / path.name
     counter = 1

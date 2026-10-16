@@ -41,6 +41,7 @@ from ytmusic_tui.download.task import (
     DownloadTask,
     InvalidTransitionError,
 )
+from ytmusic_tui.errors import ConfigError
 from ytmusic_tui.library.service import library
 
 __all__ = [
@@ -411,6 +412,12 @@ class DownloadManager:
         except DestinationBusy as e:
             logger.info("Destino já reservado por outra tarefa (%s): %s", task.id, e)
             self._set_failed(task, "Outra tarefa já está baixando para este arquivo")
+            return task
+        except ConfigError as e:
+            # §8.3/T06: download_dir indisponível/pasta de trabalho recusada
+            # (permissão etc.) → erro claro na tarefa, nunca crash no worker.
+            logger.warning("Não foi possível preparar o trabalho de %s: %s", task.id, e)
+            self._set_failed(task, f"Não foi possível preparar o diretório de trabalho: {e}")
             return task
 
         try:

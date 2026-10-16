@@ -39,6 +39,7 @@ from ytmusic_tui.library.errors import (
     translate_db_error,
 )
 from ytmusic_tui.library.models import Base
+from ytmusic_tui.permissions import secure_directory, secure_file
 
 logger = logging.getLogger(__name__)
 
@@ -298,10 +299,13 @@ def _backup(
             )
         directory = db_path.parent / BACKUP_DIR_NAME
     try:
-        directory.mkdir(parents=True, exist_ok=True)
+        # §8.3/T06: pasta de backups é dado privado (0700; só aperta existente).
+        secure_directory(directory, label="diretório de backups")
         stem = db_path.stem if db_path is not None else "library"
         target = _unique_backup_path(directory, stem, from_version, to_version, reference)
         _vacuum_into(engine, target, db_path)
+        # O arquivo do backup também nasce com o modo do umask — aperta.
+        secure_file(target, label="backup da biblioteca")
     except LibraryError:
         raise
     except Exception as error:

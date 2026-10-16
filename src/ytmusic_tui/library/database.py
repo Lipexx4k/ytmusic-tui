@@ -13,6 +13,18 @@ from ytmusic_tui.config import settings
 from ytmusic_tui.library import migrations
 from ytmusic_tui.library.errors import translate_db_error
 from ytmusic_tui.library.models import Base
+from ytmusic_tui.permissions import secure_file
+
+
+def _secure_db_files(db_path: Path) -> None:
+    """0600 no banco e nos sidecars WAL/SHM (§8.3/T06).
+
+    O SQLite cria os arquivos com o modo do umask do processo; o ajuste é só
+    "apertar" (nunca afrouxa o que o usuário escolheu) e é barato (stat)
+    quando o modo já está certo. Ausentes → no-op.
+    """
+    for candidate in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        secure_file(candidate, label="banco da biblioteca")
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,9 @@ class DatabaseManager:
             cursor.execute("PRAGMA cache_size=-32768")  # 32MB cache
             cursor.execute("PRAGMA temp_store=MEMORY")
             cursor.close()
+            # §8.3/T06: dados da biblioteca são privados (o arquivo e os
+            # sidecars WAL/SHM nascem com o modo do umask).
+            _secure_db_files(self.db_path)
 
         return engine
 
@@ -93,7 +108,11 @@ class DatabaseManager:
         novo (ou arquivo alheio) → ``SchemaIncompatibleError``, sem tocar em
         nada. Devolve o resumo para log/testes.
         """
-        return migrations.migrate(self.engine, db_path=self.db_path)
+        outcome = migrations.migrate(self.engine, db_path=self.db_path)
+        # Depois das DDLs os sidecars WAL/SHM já existem; aperta de novo
+        # (§8.3/T06) — o evento de connect roda antes das primeiras escritas.
+        _secure_db_files(self.db_path)
+        return outcome
 
     def schema_version(self) -> int | None:
         """Versão do esquema persistida (``None`` se o banco não é nosso)."""
