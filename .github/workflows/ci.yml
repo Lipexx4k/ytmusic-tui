@@ -80,12 +80,22 @@ jobs:
           pip install build
           python -m build
 
+      # T06.1: o `app.tcss` é runtime de verdade (sem ele o Textual morre no
+      # startup com StylesheetError) e não era empacotado — o import sozinho
+      # não pega isso, então o CONTEÚDO do artefato é conferido antes de
+      # instalar. Este é o gate que faltava.
+      - name: Conferir conteúdo do pacote (app.tcss no wheel e no sdist)
+        run: |
+          unzip -l dist/*.whl | grep -q 'ytmusic_tui/tui/app.tcss'
+          tar tzf dist/*.tar.gz | grep -q 'ytmusic_tui/tui/app.tcss'
+
       - name: Instalar o wheel em ambiente limpo
         run: |
           python -m venv /tmp/venv-pacote
           /tmp/venv-pacote/bin/pip install dist/*.whl
 
-      - name: Smoke test (import do app + console script)
+      - name: Smoke test (import do app + CSS instalado + console script)
         run: |
           /tmp/venv-pacote/bin/python -c "import ytmusic_tui, ytmusic_tui.main, ytmusic_tui.tui.app; print('import ok')"
+          /tmp/venv-pacote/bin/python -c "import importlib.resources as res; assert res.files('ytmusic_tui.tui').joinpath('app.tcss').is_file(), 'app.tcss ausente na instalação'; print('css ok')"
           test -x /tmp/venv-pacote/bin/ytmusic-tui

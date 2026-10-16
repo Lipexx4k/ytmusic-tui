@@ -92,3 +92,10 @@ markers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Único arquivo não-`.py` de runtime do pacote (T06.1): sem ele, uma
+# instalação limpa do wheel/sdist morre no startup da TUI com
+# `StylesheetError` (o Textual resolve `CSS_PATH` relativo ao módulo).
+# O job "pacote" do CI confere o conteúdo do artefato construído.
+ytmusic_tui = ["**/*.tcss"]
