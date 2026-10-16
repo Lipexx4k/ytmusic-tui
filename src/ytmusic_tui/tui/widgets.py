@@ -171,12 +171,21 @@ class NowPlayingBar(Static):
         time_total.update(self._format_time(duration))
 
     def update_state(self, state: PlayerState) -> None:
-        """Atualiza estado do botão play/pause."""
+        """Atualiza o botão play/pause e a marca de falha (T11-R3).
+
+        ``ERROR`` mostra "falha" no lugar da faixa (o toast do app traz o
+        detalhe mascarado; um novo ``play`` chama ``update_track`` e
+        substitui o texto).
+        """
         btn = self.query_one("#btn-play-pause", Button)
         if state == PlayerState.PLAYING:
             btn.label = "⏸"
+        elif state == PlayerState.ERROR:
+            btn.label = "⚠"
         else:
             btn.label = "▶"
+        if state == PlayerState.ERROR:
+            self.query_one("#np-info", Static).update("[b]falha[/b]")
 
     def update_volume(self, volume: int) -> None:
         """Atualiza volume."""

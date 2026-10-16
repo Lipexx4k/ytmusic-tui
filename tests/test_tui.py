@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +37,16 @@ from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui import download_controller, library_controller
 from ytmusic_tui.tui.app import MainScreen, YTMusicTUI
 from ytmusic_tui.tui.playback_controller import ensure_audio_file
-from ytmusic_tui.tui.widgets import AlbumListView, SongListView, TrackListView
+from ytmusic_tui.tui.widgets import (
+    AlbumListView,
+    NowPlayingBar,
+    SongListView,
+    TrackListView,
+)
+
+#: Módulo real do player (para trocar ``mpv.MPV`` nos testes de falha do
+#: handle); a instância global vem importada como ``player`` acima.
+player_mod = sys.modules["ytmusic_tui.player"]
 
 
 class _NoopStore:
@@ -1520,6 +1530,37 @@ async def test_reconciliation_without_findings_is_quiet(monkeypatch):
 
         assert toasts == []
         assert refreshed == []
+
+
+@pytest.mark.asyncio
+async def test_mpv_indisponivel_vira_toast_sem_traceback(monkeypatch):
+    """T11-R3: libmpv ausente → toast "Erro no player: …" (ponta da UI).
+
+    O start falha sob demanda (handle nunca criado), o evento ``error``
+    chega ao app e a barra entra em falha — nada de exceção subindo para o
+    loop da TUI.
+    """
+
+    class _Explode:
+        def __init__(self, **kwargs):
+            raise OSError("sem libmpv")
+
+    player.shutdown()  # nenhum handle herdado de outro teste
+    monkeypatch.setattr(player_mod.mpv, "MPV", _Explode)
+
+    app = YTMusicTUI()
+    async with app.run_test() as pilot:
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        await pilot.pause()
+
+        assert player.play(TrackInfo(video_id="v", source_url="http://s/a.mp3")) is False
+
+        assert toasts and toasts[0].startswith("Erro no player:")
+        assert "mpv indisponível" in toasts[0]
+        bar = screen.query_one("#now-playing", NowPlayingBar)
+        assert "falha" in str(bar.query_one("#np-info", Static).render())
 
 
 if __name__ == "__main__":

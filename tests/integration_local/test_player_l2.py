@@ -21,9 +21,11 @@ import time
 from pathlib import Path
 
 import pytest
+from textual.widgets import Button, Static, TabbedContent
 
 from ytmusic_tui.player import TrackInfo, player
 from ytmusic_tui.tui.app import YTMusicTUI
+from ytmusic_tui.tui.widgets import NowPlayingBar
 
 #: Script do "yt-dlp" falso (R2): registra o próprio PID e dorme — tempo de
 #: sobra para o teste flagrar o processo vivo e derrubar o player.
@@ -155,3 +157,63 @@ async def test_app_teardown_with_real_handle_does_not_crash(real_player):
     # run_test saiu: o unmount removeu o callback e encerrou o handle real.
     assert real_player._mpv is None
     assert app._on_player_event not in real_player._callbacks
+
+
+@pytest.mark.asyncio
+async def test_mpv_real_error_reaches_bar_and_toast(real_player, monkeypatch, tmp_path):
+    """T11-R3: end-file error do mpv REAL → barra em falha + toast.
+
+    Carga de arquivo local inexistente (hermética, sem rede): o mpv real
+    emite ``end-file`` reason ``error``; o evento vira estado ERROR na
+    barra ("falha") e toast "Erro no player: …" — sem traceback no app.
+    """
+    app = YTMusicTUI()
+    async with app.run_test() as pilot:
+        screen = app.screen
+        toasts: list[str] = []
+        monkeypatch.setattr(screen, "_toast", toasts.append)
+        await pilot.pause()
+
+        assert real_player.play(
+            TrackInfo(video_id="X", source_url=str(tmp_path / "nao-existe.mp3"))
+        )
+
+        deadline = time.monotonic() + 5
+        while not toasts and time.monotonic() < deadline:
+            await pilot.pause(0.1)
+
+        assert toasts, "o erro do mpv real não chegou à UI"
+        assert toasts[0].startswith("Erro no player:")
+        bar = screen.query_one("#now-playing", NowPlayingBar)
+        assert "falha" in str(bar.query_one("#np-info", Static).render())
+        assert bar.query_one("#btn-play-pause", Button).label == "⚠"
+
+    assert real_player._mpv is None  # o unmount encerrou o handle real
+
+
+@pytest.mark.asyncio
+async def test_ui_stays_responsive_while_hook_loads(real_player, monkeypatch, tmp_path):
+    """T11-R3: UI responsiva com a carga "pendurada" no hook ytdl.
+
+    O fake yt-dlp dorme (mpv "carregando" por tempo indeterminado); com o
+    handle real nessa carga, o app tem de seguir processando teclas — nada
+    no player segura o loop da TUI.
+    """
+    fake = tmp_path / "yt-dlp"
+    fake.write_text(FAKE_YTDLP_SCRIPT, encoding="utf-8")
+    fake.chmod(0o755)
+    pid_file = tmp_path / "ytdl.pid"
+    monkeypatch.setenv("FAKE_YTDLP_PID_FILE", str(pid_file))
+    monkeypatch.setattr(real_player, "_find_yt_dlp", lambda: str(fake))
+
+    app = YTMusicTUI()
+    async with app.run_test() as pilot:
+        screen = app.screen
+        assert real_player.play(
+            TrackInfo(video_id="FAKE", source_url="https://www.youtube.com/watch?v=FAKE")
+        )
+        _wait_for_file(pid_file, timeout=10)  # hook rodando: carga pendurada
+
+        await pilot.press("ctrl+l")  # a tecla precisa ser processada mesmo assim
+        tabs = screen.query_one("#main-tabs", TabbedContent)
+        assert tabs.active == "tab-library"

@@ -20,6 +20,20 @@ from ytmusic_tui.diagnostics import mask_diagnostics
 logger = logging.getLogger(__name__)
 
 
+def _as_text(value: Any) -> str:
+    """Normaliza campo de evento do python-mpv (``bytes``) para texto.
+
+    O ``as_dict()`` do python-mpv 1.0 entrega os campos como ``bytes``
+    (decoder padrão); sem normalizar, ``reason == "error"``/``"eof"`` nunca
+    casava e a falha de stream sumia (T11-R3).
+    """
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    if value is None:
+        return ""
+    return str(value)
+
+
 class PlayerState(Enum):
     STOPPED = "stopped"
     PLAYING = "playing"
@@ -203,35 +217,50 @@ class MPVPlayer:
 
         @self._mpv.property_observer("pause")
         def _on_pause(_name: str, value: Any) -> None:
-            if value is not None:
-                if value:
-                    self._state = PlayerState.PAUSED
-                    self._emit("pause", {})
-                else:
-                    self._state = PlayerState.PLAYING
-                    self._emit("resume", {})
+            if value is None:
+                return
+            # Depois de uma falha o mpv ainda mexe em "pause" ao descarregar
+            # a faixa; isso NÃO pode "reviver" o player (a barra perderia o
+            # "falha"). O estado ERROR é pegajoso até um novo play/stop
+            # (T11-R3).
+            if self._state == PlayerState.ERROR:
+                return
+            if value:
+                self._state = PlayerState.PAUSED
+                self._emit("pause", {})
+            else:
+                self._state = PlayerState.PLAYING
+                self._emit("resume", {})
 
         @self._mpv.property_observer("idle-active")
         def _on_idle(_name: str, value: Any) -> None:
-            if value and self._state != PlayerState.STOPPED:
+            # Uma carga que FALHOU também deixa o mpv idle: ali o "ended"
+            # seria um fim de faixa falso em cima do erro recém-emitido (a
+            # barra piscaria "falha" e voltaria a parado). O estado ERROR
+            # fica até um novo play (T11-R3).
+            if value and self._state not in (PlayerState.STOPPED, PlayerState.ERROR):
                 self._state = PlayerState.STOPPED
                 self._current_track = None
                 self._emit("ended", {})
 
         @self._mpv.event_callback("end-file")
         def _on_end_file(event: Any) -> None:
-            # python-mpv entrega um MpvEvent (não um dict). Usamos as_dict()
-            # para acessar os campos de forma segura.
+            # python-mpv entrega um MpvEvent (não um dict) e os campos de
+            # texto como bytes (T11-R3) — normalizar antes de comparar.
             try:
                 data = event.as_dict()
             except Exception:
                 return
-            reason = data.get("reason")
+            reason = _as_text(data.get("reason"))
             if reason == "eof":
                 self._emit("track_ended", {"reason": "eof"})
             elif reason == "error":
                 self._state = PlayerState.ERROR
-                self._emit("error", {"message": data.get("error", "Erro desconhecido")})
+                detail = _as_text(data.get("file_error")).strip()
+                self._emit(
+                    "error",
+                    {"message": detail or "erro ao carregar o stream"},
+                )
 
     def _emit(self, event: str, data: dict[str, Any] | None = None) -> None:
         """Emite evento para callbacks registrados.

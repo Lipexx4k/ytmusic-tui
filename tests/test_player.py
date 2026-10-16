@@ -21,9 +21,19 @@ class _FakeMpv:
         self.kwargs = kwargs
         self.played: str | None = None
         self.end_file_cb = None  # observer de end-file capturado (T11-R2)
+        self.idle_cb = None  # observer de idle-active capturado (T11-R3)
+        self.pause_cb = None  # observer de pause capturado (T11-R3)
+        self.seeks: list[tuple[float, str]] = []
+        self.stopped = 0
+        self.pause = False
+        self.volume = kwargs.get("volume", 100)
 
     def property_observer(self, name):
         def wrapper(fn):
+            if name == "idle-active":
+                self.idle_cb = fn
+            elif name == "pause":
+                self.pause_cb = fn
             return fn
 
         return wrapper
@@ -38,6 +48,12 @@ class _FakeMpv:
 
     def play(self, url):
         self.played = url
+
+    def stop(self):
+        self.stopped += 1
+
+    def seek(self, amount, reference="relative"):
+        self.seeks.append((amount, reference))
 
     def terminate(self):
         pass
@@ -372,6 +388,142 @@ def test_remove_callback_is_idempotent_and_ignores_unknown(monkeypatch):
     p.next_track()
 
     assert received == ["next"]
+
+
+# ===== Falhas de stream: evento → estado (T11-R3) =====
+
+
+def test_end_file_error_decodes_bytes_and_becomes_error_event(monkeypatch):
+    """T11-R3: end-file error do mpv real (campos em bytes) vira evento.
+
+    O ``as_dict()`` do python-mpv entrega ``reason``/``file_error`` como
+    bytes; sem o decode, a comparação com "error" nunca casava e a falha de
+    stream sumia da UI (o mesmo valia para o "eof", que não chegava como
+    ``track_ended``).
+    """
+    p, fake = _started_player(monkeypatch)
+    events: list[tuple[str, str]] = []
+    p.on_event(lambda e: events.append((e.event, e.data.get("message", ""))))
+
+    fake.end_file_cb(_FakeEndFile({"reason": b"error", "file_error": b"loading failed"}))
+
+    assert p.state is PlayerState.ERROR
+    assert events == [("error", "loading failed")]
+
+
+def test_end_file_eof_decodes_to_track_ended(monkeypatch):
+    """T11-R3: "eof" (bytes) chega como ``track_ended`` — o auto-next anda."""
+    p, fake = _started_player(monkeypatch)
+    events: list[str] = []
+    p.on_event(lambda e: events.append(e.event))
+
+    fake.end_file_cb(_FakeEndFile({"reason": b"eof"}))
+
+    assert events == ["track_ended"]
+
+
+def test_end_file_error_without_detail_has_clear_fallback(monkeypatch):
+    """T11-R3: sem ``file_error``, a mensagem não vira "Erro desconhecido"."""
+    p, fake = _started_player(monkeypatch)
+    events: list[tuple[str, str]] = []
+    p.on_event(lambda e: events.append((e.event, e.data.get("message", ""))))
+
+    fake.end_file_cb(_FakeEndFile({"reason": "error"}))  # str: defensivo
+
+    assert events == [("error", "erro ao carregar o stream")]
+
+
+def test_idle_after_stream_error_keeps_the_failure_visible(monkeypatch):
+    """T11-R3: mpv fica idle depois de falhar; isso NÃO é fim de faixa.
+
+    Sem a guarda, o "ended" do idle apagava o estado ERROR e a barra
+    voltava a "parado" logo depois do toast.
+    """
+    p, fake = _started_player(monkeypatch)
+    track = TrackInfo(video_id="v", title="T")
+    events: list[str] = []
+    p.on_event(lambda e: events.append(e.event))
+    assert p.play(track) is True
+
+    fake.end_file_cb(_FakeEndFile({"reason": b"error", "file_error": b"loading failed"}))
+    # Sequência REAL do mpv ao descarregar a faixa com erro (observada com
+    # libmpv 0.40): "pause" muda (reset) e só então o idle ativa.
+    fake.pause_cb("pause", False)
+    fake.idle_cb("idle-active", True)
+
+    assert events == ["loading", "play", "error"]
+    assert p.state is PlayerState.ERROR
+    assert p.current_track is track  # a faixa que falhou continua na barra
+
+
+def test_pause_change_after_error_does_not_revive_the_player(monkeypatch):
+    """T11-R3: o mpv mexe em "pause" ao descarregar com erro; estado fica ERROR.
+
+    Sem a guarda, o reset de "pause" (False) colocava o player em PLAYING e
+    o "ended" do idle seguinte apagava a falha da barra.
+    """
+    p, fake = _started_player(monkeypatch)
+    events: list[str] = []
+    p.on_event(lambda e: events.append(e.event))
+    assert p.play(TrackInfo(video_id="v")) is True
+
+    fake.end_file_cb(_FakeEndFile({"reason": b"error", "file_error": b"loading failed"}))
+    fake.pause_cb("pause", False)
+
+    assert p.state is PlayerState.ERROR
+    assert events == ["loading", "play", "error"]
+
+
+def test_idle_after_playback_end_still_emits_ended(monkeypatch):
+    """T11-R3 (controle): fim normal — idle vira ``ended`` e limpa a faixa."""
+    p, fake = _started_player(monkeypatch)
+    assert p.play(TrackInfo(video_id="v", source_url="http://s/a.mp3")) is True
+    events: list[str] = []
+    p.on_event(lambda e: events.append(e.event))
+
+    fake.idle_cb("idle-active", True)
+
+    assert events == ["ended"]
+    assert p.state is PlayerState.STOPPED
+    assert p.current_track is None
+
+
+def test_play_switches_track_mid_playback(monkeypatch):
+    """T11-R3: play() em reprodução troca a faixa no MESMO handle."""
+    p, fake = _started_player(monkeypatch)
+    events: list[str] = []
+    p.on_event(lambda e: events.append(e.event))
+
+    assert p.play(TrackInfo(video_id="a", source_url="http://s/a.mp3")) is True
+    assert p.play(TrackInfo(video_id="b", source_url="http://s/b.mp3")) is True
+
+    assert fake.played == "http://s/b.mp3"
+    assert p.current_track is not None and p.current_track.video_id == "b"
+    assert events.count("play") == 2
+
+
+def test_volume_is_clamped_to_0_100(monkeypatch):
+    """T11-R3: volume clampado 0–100 no handle do mpv."""
+    p, fake = _started_player(monkeypatch)
+
+    p.set_volume(150)
+    assert fake.volume == 100
+    p.set_volume(-5)
+    assert fake.volume == 0
+    p.set_volume(42)
+    assert fake.volume == 42
+    assert p.get_volume() == 42
+
+
+def test_seek_uses_absolute_and_relative_references(monkeypatch):
+    """T11-R3: seek absoluto × relativo com a referência certa no mpv."""
+    p, fake = _started_player(monkeypatch)
+    assert p.play(TrackInfo(video_id="v", source_url="http://s/a.mp3")) is True
+
+    p.seek(30.0)
+    p.seek_relative(-10.0)
+
+    assert fake.seeks == [(30.0, "absolute"), (-10.0, "relative")]
 
 
 if __name__ == "__main__":
