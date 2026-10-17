@@ -1,35 +1,35 @@
 # 🎧 YouTube Music TUI
 
-Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: busca, reprodução (mpv), download de músicas e álbuns (yt-dlp + ffmpeg) e biblioteca local — **sem precisar de conta do Google**.
+A **minimalist, fast TUI client** for YouTube Music, right in your terminal: search, playback (mpv), music and album downloads (yt-dlp + ffmpeg) and a local library — **no Google account needed**.
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-542%20passando-brightgreen)
+![Tests](https://img.shields.io/badge/tests-545%20passing-brightgreen)
 ![CI](https://github.com/pr0sthetics/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
-> ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
+> ## ⚠️ Honesty warning: this project is ~80% "vibe-coded"
 >
-> A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **542 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
-> Achou um bug? Abra uma [issue](https://github.com/pr0sthetics/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
+> Most of this code was written in **vibe coding** — talking to an AI assistant, with review, tweaks and manual testing by the author along the way. It has **545 automated tests** and real daily use, so it **actually works** — but expect rough edges: the occasional bug, "AI-looking" code here and there and missing features (see **Limitations**).
+> Found a bug? Open an [issue](https://github.com/pr0sthetics/ytmusic-tui/issues). PRs are very welcome! 💜
 
 ---
 
-## ✨ Características
+## ✨ Features
 
-- 🎵 **Reprodução de música** via mpv (streaming direto, qualidade selecionável)
-- 🔍 **Busca** de músicas (25) e álbuns (15) em paralelo, com tipo e ano nos álbuns (`💿 My Dear Melancholy, — The Weeknd  (EP, 2018)`)
-- 💿 **Aba de álbum**: abra um álbum da busca e veja faixas, artista e ano — `Enter` toca (com fila contínua) e `A` baixa o álbum inteiro, **pulando faixas já baixadas**
-- 📥 **Download** via yt-dlp + ffmpeg: melhor stream disponível → MP3 320 kbps (ou opus/m4a/flac), com tags ID3 e **capa embutida**
-- 📚 **Biblioteca local** em SQLite (nada de nuvem): faixas baixadas, curtidas locais e reprodução do arquivo local
-- 📊 Aba de **Downloads** com progresso em tempo real e downloads simultâneos configuráveis
-- 🚫 **Sem login**: busca, reprodução e download operam anonimamente
-- ⌨️ Interface **Textual** responsiva, com mouse (abas, listas, botões) e atalhos estilo vim
-- ⚡ **Leve**: sem Electron, sem navegador — só Python + mpv
+- 🎵 **Music playback** via mpv (direct streaming, selectable quality)
+- 🔍 **Search** for songs (25) and albums (15) in parallel, with type and year on albums (`💿 My Dear Melancholy, — The Weeknd  (EP, 2018)`)
+- 💿 **Album tab**: open an album from the search and see tracks, artist and year — `Enter` plays (with a continuous queue) and `A` downloads the whole album, **skipping tracks already downloaded**
+- 📥 **Download** via yt-dlp + ffmpeg: best stream available → MP3 320 kbps (or opus/m4a/flac), with ID3 tags and **embedded cover art**
+- 📚 **Local library** in SQLite (no cloud): downloaded tracks, local likes and playback from the local file
+- 📊 **Downloads** tab with real-time progress and configurable simultaneous downloads
+- 🚫 **No login**: search, playback and download all operate anonymously
+- ⌨️ Responsive **Textual** interface, with mouse support (tabs, lists, buttons) and vim-style shortcuts
+- ⚡ **Lightweight**: no Electron, no browser — just Python + mpv
 
 ## 📸 Screenshots
 
-### Busca — músicas e álbuns em seções separadas
+### Search — songs and albums in separate sections
 
 ```text
  ⭘                                      YouTube Music TUI                                  04:43:20
@@ -68,7 +68,7 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
                                              └───┘ └───┘ └───┘
 ```
 
-### Aba de álbum — `Enter` na busca abre aqui; `A` baixa o álbum inteiro
+### Album tab — `Enter` on a search result opens it here; `A` downloads the whole album
 
 ```text
  ⭘                                      YouTube Music TUI                                  04:43:21
@@ -107,42 +107,42 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
                                              └───┘ └───┘ └───┘
 ```
 
-*(Capturas do app real, com dados ao vivo da API; as cores variam conforme o tema do seu terminal.)*
+*(Screenshots of the real app, with live API data; colors vary with your terminal theme.)*
 
-## 📋 Requisitos
+## 📋 Requirements
 
 - **Python 3.11+**
-- **mpv** (com libmpv) — é o player. Na maioria das distros o pacote `mpv` já inclui a libmpv (se o app não abrir, veja *Problemas comuns na instalação*)
-- **ffmpeg** — conversão e marcação dos downloads
-- Dependências Python (ytmusicapi, textual, yt-dlp, sqlalchemy…) são instaladas via pip/pipx junto com o app
-- Terminal com cores (256/true color) e Unicode — **mínimo 80×24**, recomendado 100×30+
+- **mpv** (with libmpv) — it's the player. On most distros the `mpv` package already includes libmpv (if the app won't open, see *Common installation problems*)
+- **ffmpeg** — conversion and tagging of downloads
+- Python dependencies (ytmusicapi, textual, yt-dlp, sqlalchemy…) are installed via pip/pipx along with the app
+- A terminal with colors (256/true color) and Unicode — **minimum 80×24**, 100×30+ recommended
 
-## 🖥️ Compatibilidade
+## 🖥️ Compatibility
 
-| Plataforma | Status |
+| Platform | Status |
 |------------|--------|
-| **Linux** | ✅ **Testado** — desenvolvido e usado no LMDE 7 (base Debian 13). Qualquer distro com Python 3.11+ e mpv deve funcionar |
-| **macOS** | 🟡 Não testado — deve funcionar com `brew install mpv ffmpeg` |
-| **Windows (WSL2)** | 🟡 Não testado — funciona dentro do WSL seguindo as instruções de Linux |
-| **Windows (nativo)** | ❌ Não suportado oficialmente — exigiria configurar a DLL da libmpv manualmente |
+| **Linux** | ✅ **Tested** — developed and used on LMDE 7 (Debian 13 base). Any distro with Python 3.11+ and mpv should work |
+| **macOS** | 🟡 Untested — should work with `brew install mpv ffmpeg` |
+| **Windows (WSL2)** | 🟡 Untested — works inside WSL following the Linux instructions |
+| **Windows (native)** | ❌ Not officially supported — would require configuring the libmpv DLL manually |
 
-## ✅ Versões conhecidas boas
+## ✅ Known-good versions
 
-Combinações validadas (o conjunto exato de dependências Python usado no CI está no [`uv.lock`](uv.lock); os pisos, no `pyproject.toml`):
+Validated combinations (the exact Python dependency set used in CI is in [`uv.lock`](uv.lock); the floors are in `pyproject.toml`):
 
-| Componente | Versão validada | Como conferir |
+| Component | Validated version | How to check |
 |---|---|---|
-| **Python** | 3.11–3.13 (CI roda em 3.11 e 3.13; desenvolvimento do autor em 3.13.5) | `python3 --version` |
-| **mpv / libmpv** | mpv 0.40.0 com libmpv.so.2 (LMDE 7 / Debian 13) | `mpv --version \| head -n1` · `ldconfig -p \| grep libmpv` |
+| **Python** | 3.11–3.13 (CI runs on 3.11 and 3.13; author's development on 3.13.5) | `python3 --version` |
+| **mpv / libmpv** | mpv 0.40.0 with libmpv.so.2 (LMDE 7 / Debian 13) | `mpv --version \| head -n1` · `ldconfig -p \| grep libmpv` |
 | **ffmpeg** | 7.1.5 (Debian 13) | `ffmpeg -version \| head -n1` |
-| **yt-dlp** | piso `>=2024.1.0` no pyproject; 2026.8.19 no ambiente do autor | `yt-dlp --version` · no venv: `python -c "import yt_dlp; print(yt_dlp.version.__version__)"` |
-| **ytmusicapi** | piso `>=1.8.0` no pyproject; 1.12.3 no ambiente do autor (conferido em runtime na aba ⚙️ Config, T10) | no venv: `pip show ytmusicapi \| head -n2` |
+| **yt-dlp** | floor `>=2024.1.0` in pyproject; 2026.8.19 in the author's environment | `yt-dlp --version` · in the venv: `python -c "import yt_dlp; print(yt_dlp.version.__version__)"` |
+| **ytmusicapi** | floor `>=1.8.0` in pyproject; 1.12.3 in the author's environment (checked at runtime on the ⚙️ Config tab, T10) | in the venv: `pip show ytmusicapi \| head -n2` |
 
-O **yt-dlp** muda com frequência (o YouTube muda as regras do jogo): mantenha-o atualizado — o Dependabot já abre PR semanal e uma atualização que quebre a reprodução aparece no CI antes do merge.
+**yt-dlp** changes often (YouTube keeps changing the rules of the game): keep it up to date — Dependabot already opens a weekly PR, and an update that breaks playback shows up in CI before the merge.
 
-## 📦 Instalação
+## 📦 Installation
 
-### 1. Dependências do sistema
+### 1. System dependencies
 
 ```bash
 # Ubuntu / Debian / Linux Mint / LMDE
@@ -161,220 +161,260 @@ sudo zypper install mpv ffmpeg python3
 brew install mpv ffmpeg python
 ```
 
-### 2. Instalar o app
+### 2. Install the app
 
-**Opção A — pipx (recomendada, ambiente isolado):**
+**Option A — pipx (recommended, isolated environment):**
 
 ```bash
 pipx install git+https://github.com/pr0sthetics/ytmusic-tui
 ```
 
-**Opção B — pip:**
+**Option B — pip:**
 
 ```bash
 pip install --user git+https://github.com/pr0sthetics/ytmusic-tui
 ```
 
-**Opção C — do código-fonte (para desenvolver):**
+**Option C — from source (for development):**
 
 ```bash
 git clone https://github.com/pr0sthetics/ytmusic-tui
 cd ytmusic-tui
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/ytmusic-tui    # ou: .venv/bin/python main.py
+.venv/bin/ytmusic-tui    # or: .venv/bin/python main.py
 ```
 
-### 3. Configuração (opcional)
+### 3. Configuration (optional)
 
-O app **funciona sem nenhuma configuração**. Se quiser ajustar player, downloads e interface:
+The app **works with no configuration at all**. If you want to tweak the player, downloads and interface:
 
 ```bash
 mkdir -p ~/.config/ytmusic-tui
 cp config.example.toml ~/.config/ytmusic-tui/config.toml
 ```
 
-### Problemas comuns na instalação
+### Common installation problems
 
-- **`Cannot find libmpv in the usual places`** (ou mensagem parecida do python-mpv) ao abrir o app: o Python não encontrou a libmpv. No Ubuntu/Debian instale também `sudo apt install libmpv-dev` — ele fornece o link `libmpv.so` que o Python procura (no Ubuntu 24.04, por exemplo, o pacote `mpv` sozinho nem sempre basta).
-- **A música não toca / o stream falha**: quase sempre é o yt-dlp desatualizado em relação a alguma mudança do YouTube — atualize o app e o yt-dlp no mesmo ambiente de instalação (`pip install -U yt-dlp` no venv, ou `pipx upgrade` + `pipx runpip ytmusic-tui install -U yt-dlp`).
+- **`Cannot find libmpv in the usual places`** (or a similar python-mpv message) when opening the app: Python couldn't find libmpv. On Ubuntu/Debian also install `sudo apt install libmpv-dev` — it provides the `libmpv.so` symlink Python looks for (on Ubuntu 24.04, for example, the `mpv` package alone is not always enough).
+- **Music doesn't play / the stream fails**: it's almost always yt-dlp out of date with some YouTube change — update the app and yt-dlp in the same install environment (`pip install -U yt-dlp` in the venv, or `pipx upgrade` + `pipx runpip ytmusic-tui install -U yt-dlp`).
 
-## 🚀 Uso
+## 🚀 Usage
 
 ```bash
-ytmusic-tui              # instalado via pip/pipx
-python -m ytmusic_tui    # como módulo
-python main.py           # direto do código-fonte (usa src/, sem instalar o pacote)
+ytmusic-tui              # installed via pip/pipx
+python -m ytmusic_tui    # as a module
+python main.py           # straight from the source tree (uses src/, no install)
 ```
 
-### Fluxo básico
+### Basic flow
 
-1. `Ctrl+S` para ir à busca → digite e `Enter`
-2. `Enter` numa música toca; `→` / `←` navegam pela fila
-3. `Enter` num álbum abre a aba 💿 com as faixas; `A` (ou o botão) baixa o álbum inteiro
-4. `Ctrl+D` baixa a música em reprodução — acompanhe na aba 📥 Downloads
-5. `Ctrl+L` abre a biblioteca local: toque direto dos arquivos baixados
+1. `Ctrl+S` to go to the search → type and press `Enter`
+2. `Enter` on a song plays it; `→` / `←` move through the queue
+3. `Enter` on an album opens the 💿 tab with its tracks; `A` (or the button) downloads the whole album
+4. `Ctrl+D` downloads the track now playing — follow it on the 📥 Downloads tab
+5. `Ctrl+L` opens the local library: play straight from the downloaded files
 
-### Atalhos de teclado
+### Keyboard shortcuts
 
-| Tecla | Ação |
+| Key | Action |
 |-------|------|
-| `Ctrl+S` | Ir para a busca |
-| `Enter` | Tocar faixa / abrir álbum selecionado |
-| `Espaço` | Play/Pause |
-| `→` / `←` | Próxima / anterior |
-| `Ctrl+D` | Baixar a faixa em reprodução |
-| `A` | Baixar o álbum inteiro (aba do álbum) |
-| `Esc` | Voltar do álbum para a busca |
-| `L` | Curtir / descurtir (local, para faixas baixadas) |
-| `Ctrl+L` | Ir para a biblioteca |
-| `F1` | Ajuda |
-| `Ctrl+Q` | Sair |
+| `Ctrl+S` | Go to the search |
+| `Enter` | Play track / open selected album |
+| `Space` | Play/Pause |
+| `→` / `←` | Next / previous |
+| `Ctrl+D` | Download the track now playing |
+| `A` | Download the whole album (album tab) |
+| `Esc` | Back from the album to the search |
+| `L` | Like / unlike (local, for downloaded tracks) |
+| `Ctrl+L` | Go to the library |
+| `F1` | Help |
+| `Ctrl+Q` | Quit |
 
-O mouse também funciona: clique nas abas, nos resultados e nos botões.
+The mouse works too: click on tabs, results and buttons.
 
-## ⚙️ Configuração
+## ⚙️ Configuration
 
-Arquivo: `~/.config/ytmusic-tui/config.toml` (todas as chaves são opcionais).
-A aba **Config** do app edita as principais opções e grava nesse mesmo arquivo na hora.
+File: `~/.config/ytmusic-tui/config.toml` (every key is optional).
+The app's **Config** tab edits the main options and writes to that same file right away.
 
-| Chave | Padrão | Descrição |
+| Key | Default | Description |
 |-------|--------|-----------|
-| `mpv_volume` | `50` | Volume inicial (0–100) |
-| `mpv_audio_quality` | `"high"` | Stream usado pelo mpv: `low`, `medium`, `high`, `best` |
-| `download_dir` | `"~/Music/YouTube Music"` | Diretório dos downloads |
-| `download_format` | `"mp3"` | Formato: `mp3`, `opus`, `m4a` ou `flac` |
-| `download_quality` | `"320"` | Bitrate em kbps (mp3/opus) ou `"best"` |
-| `download_concurrent` | `3` | Downloads simultâneos (1–10) |
-| `embed_metadata` | `true` | Tags ID3 + capa embutida nos arquivos |
-| `show_notifications` | `true` | Notificações toast |
-| `auto_play_next` | `true` | Tocar a próxima da fila automaticamente |
-| `library_db_name` | `"library.db"` | Nome do arquivo SQLite da biblioteca |
-| `config_dir`, `data_dir`, `cache_dir` | XDG | Diretórios internos (avançado, geralmente não mexa) |
+| `mpv_volume` | `50` | Initial volume (0–100) |
+| `mpv_audio_quality` | `"high"` | Stream used by mpv: `low`, `medium`, `high`, `best` |
+| `download_dir` | `"~/Music/YouTube Music"` | Downloads directory |
+| `download_format` | `"mp3"` | Format: `mp3`, `opus`, `m4a` or `flac` |
+| `download_quality` | `"320"` | Bitrate in kbps (mp3/opus) or `"best"` |
+| `download_concurrent` | `3` | Simultaneous downloads (1–10) |
+| `embed_metadata` | `true` | ID3 tags + embedded cover art in the files |
+| `show_notifications` | `true` | Toast notifications |
+| `auto_play_next` | `true` | Automatically play the next track in the queue |
+| `library_db_name` | `"library.db"` | SQLite file name of the local library |
+| `config_dir`, `data_dir`, `cache_dir` | XDG | Internal directories (advanced, usually don't touch) |
 
-Variáveis de ambiente com prefixo `YTMUSIC_` têm prioridade sobre o TOML (útil para testar isolado):
+Environment variables prefixed with `YTMUSIC_` take priority over the TOML (handy for isolated testing):
 
 ```bash
 YTMUSIC_DOWNLOAD_DIR=/tmp/teste YTMUSIC_DATA_DIR=/tmp/teste ytmusic-tui
 ```
 
-### Onde ficam os arquivos (Linux)
+### Where the files live (Linux)
 
-| O quê | Caminho |
+| What | Path |
 |-------|---------|
-| Configuração | `~/.config/ytmusic-tui/config.toml` |
-| Biblioteca (SQLite) | `~/.local/share/ytmusic-tui/library.db` |
+| Configuration | `~/.config/ytmusic-tui/config.toml` |
+| Library (SQLite) | `~/.local/share/ytmusic-tui/library.db` |
 | Cache | `~/.cache/ytmusic-tui/` |
 | Downloads | `~/Music/YouTube Music/` |
 | Log | `~/.local/state/ytmusic-tui/log/ytmusic-tui.log` |
 
-*(Em macOS/Windows são usados os caminhos equivalentes do `platformdirs`.)*
+*(On macOS/Windows the equivalent `platformdirs` paths are used.)*
 
-Erros internos (por exemplo, falha ao acessar o banco da biblioteca) aparecem
-na própria interface **e** no log do app — veja as duas seções abaixo antes
-de abrir uma issue.
+Internal errors (for example, failing to reach the library database) show up
+in the interface itself **and** in the app log — check the two sections below
+before opening an issue.
 
 ### Logs (`~/.local/state/ytmusic-tui/log/ytmusic-tui.log`)
 
-O log é **JSON Lines**: cada linha é um objeto JSON com campos fixos (`ts`,
-`level`, `component`, `operation_id`, `event`, `error_code`, `message` e, em
-erros, `detail` com o traceback). Eventos importantes — subida/parada do app
-(com as versões), download iniciado/concluído/falhou, retentativas da API,
-migrações do banco, erros de banco, quarentena e recuperação — têm `event` e
-`error_code` próprios, o que deixa o diagnóstico greppável:
+The log is **JSON Lines**: each line is a JSON object with fixed fields (`ts`,
+`level`, `component`, `operation_id`, `event`, `error_code`, `message` and, on
+errors, `detail` with the traceback). Important events — app start/stop (with
+the versions), download started/finished/failed, API retries, database
+migrations, database errors, quarantine and recovery — carry their own `event`
+and `error_code`, which makes diagnosis greppable:
 
 ```bash
 jq -c 'select(.event != null)' ~/.local/state/ytmusic-tui/log/ytmusic-tui.log | tail
 ```
 
-A privacidade é aplicada pelo próprio app ao gravar: o HOME vira `~`, URLs
-perdem query/token e cabeçalhos de credencial viram `[REDACTED]` — nada disso
-fica cru no arquivo. O log é 0600, com rotação de 1 MB × 3 backups (máximo de
-4 MB no total).
+Privacy is enforced by the app itself when writing: HOME becomes `~`, URLs
+lose query/token and credential headers become `[REDACTED]` — none of that
+stays raw in the file. The log is 0600, with 1 MB × 3 backups rotation
+(4 MB maximum in total).
 
-### Diagnóstico (`ytmusic-tui doctor`)
+### Diagnostics (`ytmusic-tui doctor`)
 
-O comando `ytmusic-tui doctor` (ou `python -m ytmusic_tui doctor`) diagnostica
-o ambiente **sem abrir a interface** — as verificações não criam, alteram nem
-baixam arquivos: versões (app, Python, ytmusicapi, yt-dlp), libmpv e binários
-`mpv`/`ffmpeg`, diretórios (existência, escrita, modo), banco da biblioteca em
-somente leitura (`integrity_check` + versão do esquema × app) e resíduos de
-manutenção (quarentena, backups, log).
+The `ytmusic-tui doctor` command (or `python -m ytmusic_tui doctor`) checks
+the environment **without opening the interface** — the checks do not create,
+change or download any files: versions (app, Python, ytmusicapi, yt-dlp),
+libmpv and the `mpv`/`ffmpeg` binaries, directories (existence, writability,
+mode), the library database read-only (`integrity_check` + schema version ×
+app) and maintenance leftovers (quarantine, backups, log).
 
 ```bash
 ytmusic-tui doctor
 ```
 
-A saída é mascarada (mesmas regras do log) e feita para colar numa issue —
-ainda assim, revise antes de compartilhar. Exit code `0` = nada essencial
-quebrado; `1` = algo essencial (libmpv ou dependência ausente, diretório sem
-escrita, banco ilegível/corrompido ou mais novo que o app).
+The output is masked (same rules as the log) and made to be pasted into an
+issue — still, review it before sharing. Exit code `0` = nothing essential
+broken; `1` = something essential (libmpv or a dependency missing, a
+directory without write access, a database unreadable/corrupted or newer
+than the app).
 
-## 🔧 Como funciona (por dentro)
+## 🔧 How it works (under the hood)
 
-- **[ytmusicapi](https://github.com/sigma67/ytmusicapi)** (não oficial) em **modo anônimo** para busca e metadados — a busca dispara pedidos em paralelo e leva ~2s
-- **[mpv](https://mpv.io/)** (via libmpv/python-mpv) toca os streams; o mpv usa o **yt-dlp instalado junto com o app** como extrator (`ytdl_hook-ytdl_path`), então a reprodução acompanha o yt-dlp atualizado em vez do extrator embutido e velho do mpv
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp) + ffmpeg** baixam o melhor stream de áudio e convertem para o formato configurado, com capa e tags
-- **SQLAlchemy + SQLite** guardam a biblioteca local (faixas baixadas, curtidas)
+- **[ytmusicapi](https://github.com/sigma67/ytmusicapi)** (unofficial) in **anonymous mode** for search and metadata — the search fires requests in parallel and takes ~2s
+- **[mpv](https://mpv.io/)** (via libmpv/python-mpv) plays the streams; mpv uses the **yt-dlp installed alongside the app** as its extractor (`ytdl_hook-ytdl_path`), so playback follows the up-to-date yt-dlp instead of mpv's old built-in extractor
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp) + ffmpeg** download the best audio stream and convert it to the configured format, with cover art and tags
+- **SQLAlchemy + SQLite** hold the local library (downloaded tracks, likes)
 
-> **Por que sem login?** O Google desativou a autenticação OAuth do ytmusicapi em 2025 — os tokens passaram a ser rejeitados com HTTP 400 ([sigma67/ytmusicapi#813](https://github.com/sigma67/ytmusicapi/issues/813)). Como busca, reprodução e download funcionam anonimamente, este cliente escolheu operar **sem conta**: nada de sincronização, tudo local.
+> **Why no login?** Google turned off ytmusicapi's OAuth authentication in 2025 — tokens started being rejected with HTTP 400 ([sigma67/ytmusicapi#813](https://github.com/sigma67/ytmusicapi/issues/813)). Since search, playback and download work anonymously, this client chose to operate **without an account**: no synchronization, everything local.
 >
-> ⚙️ Detalhe técnico: o libmpv exige `LC_NUMERIC=C`, mas o ytmusicapi muda o locale para `en_US.UTF-8` (e o mpv abortava por isso). O app restaura o locale antes de iniciar o player.
+> ⚙️ Technical detail: libmpv requires `LC_NUMERIC=C`, but ytmusicapi switches the locale to `en_US.UTF-8` (and mpv aborted because of that). The app restores the locale before starting the player.
 
-## ⚠️ Limitações
+## ⚠️ Limitations
 
-**Conta e biblioteca:**
-- Sem login: curtidas, playlists e recomendações **da sua conta** não aparecem; a "curtida" (`L`) é **local** e só funciona para faixas já baixadas
-- Não há sincronização com o YouTube Music — a biblioteca vive só no seu `library.db`
+**Account and library:**
+- No login: likes, playlists and recommendations **from your account** don't show up; the `L` "like" is **local** and only works for tracks already downloaded
+- There's no synchronization with YouTube Music — the library lives only in your `library.db`
 
-**Busca e catálogo:**
-- Até **25 músicas + 15 álbuns** por consulta
-- Sem filtros avançados (busca por artista, playlist, ordenação etc.)
-- Playlists ainda não são suportadas (veja o Roadmap)
+**Search and catalog:**
+- Up to **25 songs + 15 albums** per query
+- No advanced filters (search by artist, playlist, sorting etc.)
+- Playlists are not supported yet (see the Roadmap)
 
-**Downloads e qualidade:**
-- A qualidade real depende da fonte: o YouTube Music serve tipicamente áudio de **~128–256 kbps** (AAC/Opus); o "MP3 320" é uma conversão — não inventa qualidade, mas padroniza os arquivos
-- O download depende do yt-dlp; quando o YouTube muda algo, atualizar o yt-dlp no mesmo ambiente (ou reinstalar/atualizar o app) costuma resolver
+**Downloads and quality:**
+- The real quality depends on the source: YouTube Music typically serves **~128–256 kbps** audio (AAC/Opus); the "MP3 320" is a conversion — it doesn't create quality, but it standardizes the files
+- Downloads depend on yt-dlp; when YouTube changes something, updating yt-dlp in the same environment (or reinstalling/updating the app) usually fixes it
 
-**Projeto jovem:**
-- Interface e mensagens **em português**
-- **~80% vibe-coded** (aviso no topo 🙂): os 542 testes cobrem o fluxo principal, mas bugs ocasionais são esperados
-- Sem MPRIS, letras, equalizador, rádio automático e temas (Roadmap)
+**Young project:**
+- Interface and messages **in Portuguese**
+- **~80% vibe-coded** (warning at the top 🙂): the 545 tests cover the main flow, but the occasional bug is expected
+- No MPRIS, lyrics, equalizer, automatic radio or themes (Roadmap)
 
-## 🗂️ Estrutura do projeto
+## 🆘 When something breaks (and it's not the app)
+
+Not every failure is a bug here: the app depends on external services and
+tools that change all the time. Short checklist, from the cheapest step to
+the most specific:
+
+1. **First step: `ytmusic-tui doctor`.** It checks versions, libmpv,
+   `mpv`/`ffmpeg`, directories and the library database read-only, and the
+   output is already masked to paste into an issue. Exit `0` = nothing
+   essential broken; exit `1` = something essential is off (the report says
+   what). More in *Logs* and *Diagnostics* above.
+2. **The YouTube Music contract changed.** Symptoms: structure/field errors
+   when searching or opening an album, or a red contract run (the weekly
+   `contract.yml` workflow). From a source checkout, run the real-integration
+   tests and attach the per-field/per-item report to the issue:
+   `YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v -s`.
+   A green `doctor` with a red contract run points outside: the service
+   changed, not your install.
+3. **yt-dlp extraction broke** (YouTube changed the rules of the game).
+   Symptoms: downloads fail, or the log shows a yt-dlp error or an
+   `FFMPEG_EXIT_N` error code. Update yt-dlp in the same install environment
+   (`pip install -U yt-dlp` in the venv, or
+   `pipx runpip ytmusic-tui install -U yt-dlp`) and watch for the Dependabot
+   PR; yt-dlp's own issue tracker usually tells whether it's a known YouTube
+   change.
+4. **Network, rate limit, block or service down.** Timeouts, 5xx, 403, "are
+   you a robot", rate limiting, region restrictions: try again later —
+   inconclusive is neither corrupted data nor a bug.
+5. **mpv/libmpv or ffmpeg missing.** Symptoms: the player doesn't open, or
+   the downloads' conversion fails. `doctor` flags it; install the system
+   packages from *Installation* above (`mpv` — plus `libmpv-dev` on
+   Ubuntu/Debian — and `ffmpeg`).
+6. **How to report:** the `doctor` output + a log excerpt + the versions
+   involved. The log is already masked (no tokens, signed URLs or
+   credentials), so you don't need to censor it by hand.
+
+And a reminder: the contract check runs **every Monday** (`contract.yml`) —
+a red run there is an external problem, not your installation.
+
+## 🗂️ Project structure
 
 ```text
 ytmusic-tui/
-├── main.py                    # Atalho para rodar do código-fonte (usa src/ direto)
-├── pyproject.toml             # Metadados e dependências (pip/pipx)
-├── config.example.toml        # Modelo de configuração comentado
+├── main.py                    # Shortcut to run from source (uses src/ directly)
+├── pyproject.toml             # Metadata and dependencies (pip/pipx)
+├── config.example.toml        # Commented configuration template
 ├── src/ytmusic_tui/
-│   ├── main.py                # Entry point do console script `ytmusic-tui`
-│   ├── config/                # Configuração (pydantic-settings + persistência TOML)
-│   ├── api/                   # ytmusicapi anônimo (busca, álbuns)
-│   ├── player/                # Player mpv (libmpv) + integração com yt-dlp
-│   ├── download/              # Fila de downloads yt-dlp (progresso, concorrência)
-│   ├── library/               # Biblioteca SQLite (SQLAlchemy)
-│   ├── log.py                 # Logging em arquivo (com rotação)
-│   └── tui/                   # Interface Textual
-│       ├── app.py             # Ciclo de vida do app + main() (app.tcss ao lado)
-│       ├── screens.py         # MainScreen: abas, atalhos e navegação
-│       ├── widgets.py         # Widgets personalizados (listas, barra do player)
-│       └── *_controller.py    # Reprodução, downloads e biblioteca (mixins)
-└── tests/                     # 542 testes em camadas (L1 mocks + L2 local) + integração opt-in
+│   ├── main.py                # Entry point of the `ytmusic-tui` console script
+│   ├── config/                # Configuration (pydantic-settings + TOML persistence)
+│   ├── api/                   # Anonymous ytmusicapi (search, albums)
+│   ├── player/                # mpv player (libmpv) + yt-dlp integration
+│   ├── download/              # yt-dlp download queue (progress, concurrency)
+│   ├── library/               # SQLite library (SQLAlchemy)
+│   ├── log.py                 # File logging (with rotation)
+│   └── tui/                   # Textual interface
+│       ├── app.py             # App lifecycle + main() (app.tcss next to it)
+│       ├── screens.py         # MainScreen: tabs, shortcuts and navigation
+│       ├── widgets.py         # Custom widgets (lists, player bar)
+│       └── *_controller.py    # Playback, downloads and library (mixins)
+└── tests/                     # 545 tests in layers (L1 mocks + L2 local) + opt-in integration
 ```
 
-## 🛠️ Desenvolvimento
+## 🛠️ Development
 
 ```bash
 git clone https://github.com/pr0sthetics/ytmusic-tui
 cd ytmusic-tui
-uv sync --locked --extra dev    # cria/atualiza o .venv a partir do uv.lock
+uv sync --locked --extra dev    # creates/updates .venv from uv.lock
 
-# Testes (offline, tudo com mocks — L1 + L2)
+# Tests (offline, everything mocked — L1 + L2)
 .venv/bin/python -m pytest tests/ -q
 
-# Cobertura de branches de download/biblioteca/player (informativa, sem threshold)
+# Branch coverage for download/library/player (informative, no threshold)
 .venv/bin/python -m pytest tests/ -q \
   --cov=ytmusic_tui.download --cov=ytmusic_tui.library --cov=ytmusic_tui.player \
   --cov-branch --cov-report=term
@@ -382,50 +422,55 @@ uv sync --locked --extra dev    # cria/atualiza o .venv a partir do uv.lock
 # Lint
 .venv/bin/ruff check src/ tests/
 
-# Formatação
+# Formatting
 .venv/bin/ruff format src/ tests/
 
-# Testes de integração (falam com o YouTube Music de verdade; desabilitados por padrão)
-YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v
+# Real integration tests (they talk to the real YouTube Music; disabled by default)
+YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v -s
 
-# Auditoria de vulnerabilidades do conjunto travado (o mesmo que o CI audita)
+# Vulnerability audit of the locked set (the same one CI audits)
 uv export --frozen --no-emit-project --extra dev --no-hashes -o /tmp/ytm-locked.txt
 .venv/bin/pip-audit -r /tmp/ytm-locked.txt
 ```
 
-O **[uv](https://docs.astral.sh/uv/)** é a ferramenta de desenvolvimento/CI: o `uv.lock` fixa as versões exatas de runtime + dev e o CI instala dele (`uv sync --locked`). Se `pyproject.toml` e `uv.lock` divergirem, o `--locked` falha de propósito — depois de editar dependências, rode `uv lock`. Sem uv? `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` continua funcionando (sem o lockfile — é o CI que o usa).
+**[uv](https://docs.astral.sh/uv/)** is the development/CI tool: `uv.lock` pins the exact runtime + dev versions and CI installs from it (`uv sync --locked`). If `pyproject.toml` and `uv.lock` drift apart, `--locked` fails on purpose — after editing dependencies, run `uv lock`. No uv? `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` still works (without the lockfile — CI is what uses it).
 
-Os testes cobrem TUI (via `run_test` do Textual), API, player, downloads e biblioteca, em duas camadas offline: **L1** (unit/comportamento, com mocks finos) e **L2** (`tests/integration_local/` — integração local com worker, reserva/temporários e banco de verdade, e falsos "de verdade": yt-dlp stubado no import tardio e um ffmpeg **executável** no PATH). **Nenhum teste da suíte padrão toca a rede nem o player de verdade** — a L2 bloqueia `socket` de propósito, então qualquer conexão falha na hora com mensagem clara; a cobertura de branches (comando acima) é informativa, sem threshold; os testes de integração reais são opt-in (comando acima) e servem para detectar quando o YouTube Music mudar algo — desde o T10, cada um compara a resposta crua do serviço com o contrato que os adaptadores consomem e gera um relatório por campo e por item quando o formato mudar (rode com `-s` para ver o relatório).
+The tests cover the TUI (via Textual's `run_test`), API, player, downloads and library, in two offline layers: **L1** (unit/behavior, with thin mocks) and **L2** (`tests/integration_local/` — local integration with the worker, reservation/temporary files and a real database, plus "real" fakes: yt-dlp stubbed at the late import and an **executable** ffmpeg on PATH). **No test in the standard suite touches the network or the real player** — L2 blocks `socket` on purpose, so any connection fails immediately with a clear message; branch coverage (command above) is informative, with no threshold.
 
-O **CI (GitHub Actions)** roda `ruff` + a suíte offline em Python 3.11 e 3.13 a cada push, **instalando do `uv.lock`** (`uv sync --locked` — o job falha se o lock estiver ausente ou fora de sincronia com o `pyproject.toml`), um job de segurança que exporta o conjunto travado e roda `pip-audit` (falha em vulnerabilidade conhecida) e um job de pacote que confere o conteúdo do wheel/sdist e instala o wheel num ambiente limpo. A cobertura de branches (download, biblioteca e player) roda no job de testes como passo **informativo** — sem threshold e sem bloquear o CI —, numa perna só (Python 3.13).
+Two more test layers are **opt-in**, never run in CI:
 
-As dependências são atualizadas pelo **Dependabot** (PRs semanais, grupos dev/runtime — com o lockfile, ele atualiza `uv.lock` e `pyproject.toml` juntos): o CI roda em cada PR, então uma atualização que quebre o app fica visível ali antes de entrar — útil num projeto que depende de serviços externos que mudam com frequência (YouTube, mpv, yt-dlp).
+- **L3 — real integration** (`tests/test_integration.py`): talks to the real YouTube Music and compares the raw service response with the contract the adapters consume, producing a per-field and per-item report when the format changes (run with `-s` to see the report). It also runs **every Monday at 06:00 UTC** in the `contract.yml` workflow (`workflow_dispatch` runs it on demand). Zero-noise rule: **inconclusive** (offline, service down, runner blocked) makes the tests skip with an explicit reason and the run stays green; a **contract break** fails with the report and the run turns red — the useful signal.
+- **L4 — controlled end-to-end** (`tests/e2e/`, opt-in with `YTMUSIC_E2E=1`): builds the wheel, installs it in a clean venv and runs the real flow (doctor → search → album → player → download) fully isolated in tmp. Runbook in `tests/e2e/README.md`.
 
-### Releases e atualizações
+The **CI (GitHub Actions)** runs `ruff` + the offline suite on Python 3.11 and 3.13 on every push, **installing from `uv.lock`** (`uv sync --locked` — the job fails if the lockfile is missing or out of sync with `pyproject.toml`), a security job that exports the locked set and runs `pip-audit` (fails on a known vulnerability) and a package job that checks the wheel/sdist contents and installs the wheel in a clean environment. Branch coverage (download, library and player) runs in the test job as an **informative** step — no threshold and no CI blocking —, on a single leg (Python 3.13).
 
-Cada release corresponde a um **commit rastreável** com versão no `pyproject.toml` e entrada no `CHANGELOG.md`, tag anotada (`vX.Y.Z`) e **CI verde no commit** (ex.: `v0.1.2` → commit `84b6d80`). As releases são **manuais** — nada é publicado automaticamente; hashes (SHA-256) dos artefatos e a automação do processo entram numa etapa futura.
+Dependencies are updated by **Dependabot** (weekly PRs, dev/runtime groups — with the lockfile, it updates `uv.lock` and `pyproject.toml` together): CI runs on every PR, so an update that breaks the app is visible there before it lands — handy for a project that depends on external services that change often (YouTube, mpv, yt-dlp).
 
-Atualizações de dependência seguem um caminho único: **Dependabot abre o PR → CI obrigatório (3.11/3.13 + lockfile + pip-audit + pacote) → merge manual**. Merge não é release: nenhuma atualização vai direto para uma release estável.
+### Releases and updates
+
+Each release corresponds to a **traceable commit** with the version in `pyproject.toml` and an entry in `CHANGELOG.md`, an annotated tag (`vX.Y.Z`) and a **green CI on the commit** (e.g.: `v0.1.2` → commit `84b6d80`). Releases are **manual** — nothing is published automatically; artifact hashes (SHA-256) and process automation are a future step.
+
+Dependency updates follow a single path: **Dependabot opens the PR → mandatory CI (3.11/3.13 + lockfile + pip-audit + package) → manual merge**. Merging is not releasing: no update goes straight into a stable release.
 
 ## 🗺️ Roadmap
 
-- [ ] Playlists locais
-- [ ] Rádio/Mix automático (autoplay infinito)
-- [ ] Letras sincronizadas
-- [ ] Controle via MPRIS (integ. com o desktop)
-- [ ] Equalizador
-- [ ] Temas personalizados
-- [ ] Integração com Last.fm / ListenBrainz
+- [ ] Local playlists
+- [ ] Automatic radio/mix (infinite autoplay)
+- [ ] Synced lyrics
+- [ ] MPRIS control (desktop integration)
+- [ ] Equalizer
+- [ ] Custom themes
+- [ ] Last.fm / ListenBrainz integration
 
-## 📄 Licença
+## 📄 License
 
-MIT — veja [LICENSE](LICENSE) para detalhes. © 2026 Eeyore.
+MIT — see [LICENSE](LICENSE) for details. © 2026 Eeyore.
 
-## 💜 Agradecimentos
+## 💜 Credits
 
-- [ytmusicapi](https://github.com/sigma67/ytmusicapi) — API não oficial do YouTube Music
-- [Textual](https://github.com/Textualize/textual) — framework TUI
-- [mpv](https://mpv.io/) — player de mídia
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — download de áudio
-- [ffmpeg](https://ffmpeg.org/) — conversão e metadados
-- [Rich](https://github.com/Textualize/rich), [SQLAlchemy](https://www.sqlalchemy.org/) e [pydantic](https://docs.pydantic.dev/) — o resto da base
+- [ytmusicapi](https://github.com/sigma67/ytmusicapi) — unofficial YouTube Music API
+- [Textual](https://github.com/Textualize/textual) — TUI framework
+- [mpv](https://mpv.io/) — media player
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — audio download
+- [ffmpeg](https://ffmpeg.org/) — conversion and metadata
+- [Rich](https://github.com/Textualize/rich), [SQLAlchemy](https://www.sqlalchemy.org/) and [pydantic](https://docs.pydantic.dev/) — the rest of the stack
