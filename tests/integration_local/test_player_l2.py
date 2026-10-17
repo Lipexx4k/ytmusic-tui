@@ -17,13 +17,14 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import threading
 import time
 from pathlib import Path
 
 import pytest
 from textual.widgets import Button, Static, TabbedContent
 
-from ytmusic_tui.player import TrackInfo, player
+from ytmusic_tui.player import PlayerEvent, TrackInfo, player
 from ytmusic_tui.tui.app import YTMusicTUI
 from ytmusic_tui.tui.widgets import NowPlayingBar
 
@@ -217,3 +218,65 @@ async def test_ui_stays_responsive_while_hook_loads(real_player, monkeypatch, tm
         await pilot.press("ctrl+l")  # a tecla precisa ser processada mesmo assim
         tabs = screen.query_one("#main-tabs", TabbedContent)
         assert tabs.active == "tab-library"
+
+
+@pytest.mark.asyncio
+async def test_teardown_completes_with_callback_in_flight(real_player, tmp_path):
+    """T11.1/Q14: entrega cross-thread em voo não pode travar o teardown.
+
+    Reproduz a janela do incidente de 2026-10-17 (dumps do R5/T14): a
+    thread de eventos do libmpv presa entregando um evento ao app
+    (``call_from_thread`` esperava o loop) × o ``join()`` do ``terminate()``
+    esperando essa thread. O gate segura a thread do mpv com o evento já em
+    voo; o ``shutdown()`` roda em thread auxiliar com teto próprio,
+    enquanto o loop (esta thread) fica parado — o cenário exato do CI.
+    Sem a correção o teardown não completa (falha clara, sem pendurar);
+    com a entrega não bloqueante (``post_message``) completa de imediato.
+    """
+    gate_entered = threading.Event()
+    gate_release = threading.Event()
+
+    def gate(event: PlayerEvent) -> None:
+        # Só o primeiro evento da thread do libmpv interessa: segura a
+        # entrega do app ainda pendente (a janela da corrida).
+        if threading.current_thread() is threading.main_thread():
+            return
+        if gate_entered.is_set():
+            return
+        gate_entered.set()
+        gate_release.wait(timeout=10)
+
+    real_player.on_event(gate)
+    app = YTMusicTUI()
+    async with app.run_test():
+        assert real_player.start() is True
+        # Carga que falha (arquivo local inexistente, hermético): o erro
+        # nasce na thread de eventos do mpv real, atrás do gate.
+        assert real_player.play(
+            TrackInfo(video_id="X", source_url=str(tmp_path / "nao-existe.mp3"))
+        )
+        assert gate_entered.wait(timeout=10), "o evento real do mpv não chegou ao gate"
+
+        # Solta o gate e encerra o player FORA do loop: a entrega cross-thread
+        # concorre com o terminate/join e o loop fica bloqueado no deadline,
+        # sem processar a entrega (o cenário do CI).
+        gate_release.set()
+        completed = threading.Event()
+
+        def run_shutdown() -> None:
+            real_player.shutdown()
+            completed.set()
+
+        helper = threading.Thread(target=run_shutdown, daemon=True, name="teardown-com-deadline")
+        helper.start()
+        try:
+            assert completed.wait(timeout=5), (
+                "shutdown() não completou: a thread de eventos do libmpv "
+                "ficou presa na entrega cross-thread, à espera do loop "
+                "(deadlock do teardown — Q14/T11.1)"
+            )
+        finally:
+            helper.join(timeout=5)
+
+    # O unmount do run_test reencerra o player (idempotente) sem travar.
+    assert real_player._mpv is None
