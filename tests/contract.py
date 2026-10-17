@@ -57,7 +57,11 @@ CONSUMED_ALBUM_DETAIL: dict[str, tuple[type, ...]] = {
 #: Sem estes (presentes e não vazios), a operação degrada em silêncio.
 ESSENTIAL_TRACK = ("videoId", "title")
 ESSENTIAL_ALBUM = ("browseId", "title")
-ESSENTIAL_ALBUM_DETAIL = ("browseId", "title", "tracks")
+#: O ``get_album`` do ytmusicapi NÃO ecoa o ``browseId`` (o id é entrada da
+#: chamada; o app já o tem) — conferido de 1.8.0 a 1.12.3 e flagrado na
+#: primeira rodada real do L3 (T09). Cobrar o campo aqui acusaria mudança
+#: onde não há; a busca (``ESSENTIAL_ALBUM``) essa sim o traz.
+ESSENTIAL_ALBUM_DETAIL = ("title", "tracks")
 
 #: Teto de problemas listados no relatório (o resto vira "... mais N").
 PROBLEM_LIMIT = 20
