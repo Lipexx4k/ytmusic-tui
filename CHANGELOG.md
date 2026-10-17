@@ -34,6 +34,21 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   `YTMUSIC_E2E=1`, nunca no CI) constrói o wheel, instala num venv limpo
   e roda doctor + busca + álbum + player + download reais, tudo isolado
   em tmp e com limpeza conferida; runbook em `tests/e2e/README.md`
+- Pacote publicado é instalado e executado de verdade no CI (T14): o job
+  `pacote` instala **wheel e sdist** em ambientes limpos e roda o
+  `doctor` (exit 0) pelos dois entry points suportados — console script
+  e `python -m ytmusic_tui`; o sdist ganha cobertura de instalação pela
+  primeira vez
+- Ciclo de vida da instalação documentado e testado (T14): atualizar,
+  downgrade com pin de versão exata, desinstalar (a biblioteca e os
+  downloads **não** são removidos) e remoção de dados locais, com o caso
+  real do pipx em container (distrobox/toolbox) e receita de isolamento
+  por `PIPX_HOME`/`PIPX_BIN_DIR`
+- Matriz de suporte publicada (T14): LMDE 7/Mint = referência;
+  Ubuntu/Debian compatíveis = distribuição; outra distro Linux =
+  compatibilidade; terminal 80×24 = interface — macOS/Windows nativos
+  não são oficialmente suportados; Python 3.11–3.13 (3.12 validado com a
+  suíte completa)
 
 ### Alterado
 
@@ -44,6 +59,15 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   regra vale para o job agendado
 - README em inglês (T09): o arquivo inteiro passa para o inglês (código,
   strings da interface, comentários e o CHANGELOG seguem em pt-BR)
+- CI falha rápido com diagnóstico (T14): `timeout-minutes` por job
+  (testes 45, segurança 15, pacote 20) e no passo informativo de
+  cobertura (20), mais `faulthandler` do pytest (10 min por teste, com
+  dump de todas as threads e saída imediata) — resposta ao incidente de
+  2026-10-16, quando um passo travado consumiu ~5h48m até o limite de 6 h
+  do GitHub sem nenhum stack
+- Mensagem de primeira inicialização orienta a instalação do mpv por
+  família de distro (T14) e os requisitos do README marcam o que é
+  obrigatório × opcional
 
 ### Corrigido
 
@@ -56,6 +80,10 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   janela de uma corrida rara do encerramento do player (herdada do T11)
   que travava a suíte de integração local; a ordem ficou travada por
   teste de regressão
+- README: `pip install --user` ganha aviso de que distros com Python
+  "externamente gerenciado" (PEP 668 — Debian/Ubuntu/Mint/LMDE) recusam
+  esse caminho (T14), comprovado numa rodada real em Ubuntu 24.04; lá, o
+  caminho é pipx ou um venv dedicado
 
 ## [0.1.4] - 2026-10-16
 
