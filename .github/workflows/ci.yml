@@ -9,7 +9,7 @@ jobs:
   testes:
     runs-on: ubuntu-latest
     # T14-R5: teto folgado para falhar rápido com diagnóstico (normal ~24 min).
-    # Nasceu do incidente de 2026-10-16 (run 38998741203): um step travado
+    # Nasceu do incidente de 2026-10-17 (run 38998741203): um step travado
     # consumiu as 6 h de limite do GitHub em silêncio — sem stack, sem sinal.
     # O faulthandler do pyproject (10 min/teste) dumpa as threads e derruba o
     # pytest antes deste teto.
@@ -60,7 +60,7 @@ jobs:
       # download/, library/ e player/ — sem threshold. Passo separado e não
       # bloqueante de propósito: o gate de testes é o passo acima e não pode
       # ser mascarado por este; o continue-on-error fica.
-      # T14-R5: no incidente de 2026-10-16 este passo travou ~5h48m e o job só
+      # T14-R5: no incidente de 2026-10-17 este passo travou ~5h48m e o job só
       # morreu no limite de 6 h do GitHub, sem stack nem sinal. Este timeout de
       # step (normal ~12 min) corta mesmo sem dump; o faulthandler do pyproject
       # (10 min/teste) adiciona o dump das threads antes disso.

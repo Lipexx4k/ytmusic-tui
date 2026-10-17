@@ -63,7 +63,7 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   (testes 45, segurança 15, pacote 20) e no passo informativo de
   cobertura (20), mais `faulthandler` do pytest (10 min por teste, com
   dump de todas as threads e saída imediata) — resposta ao incidente de
-  2026-10-16, quando um passo travado consumiu ~5h48m até o limite de 6 h
+  2026-10-17, quando um passo travado consumiu ~5h48m até o limite de 6 h
   do GitHub sem nenhum stack
 - Mensagem de primeira inicialização orienta a instalação do mpv por
   família de distro (T14) e os requisitos do README marcam o que é
