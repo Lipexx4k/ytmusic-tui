@@ -86,8 +86,11 @@ jobs:
       - name: Vulnerabilidades conhecidas (pip-audit no conjunto travado)
         run: uv run --locked --extra dev pip-audit -r /tmp/locked-requirements.txt
 
-  # Verifica que o artefato publicável (sdist + wheel) instala e importa em
-  # um ambiente limpo — é o que o `pip install` do usuário final executa.
+  # Verifica que o artefato publicável (sdist + wheel) instala e executa em
+  # ambientes limpos — é o que o `pip install` do usuário final executa.
+  # T14-R1: além do import/CSS/console script (T06.1), o `doctor` roda de
+  # verdade (execução real headless; exit 0). A TUI completa não é
+  # automatizável no runner e segue coberta pelo L4 local (tests/e2e).
   pacote:
     runs-on: ubuntu-latest
 
@@ -98,8 +101,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Dependências de sistema (mpv + libmpv)
-        run: sudo apt-get update && sudo apt-get install -y mpv libmpv-dev
+      # T14-R1: ffmpeg entra junto porque o smoke agora roda o `doctor`, que
+      # confere os binários `mpv` e `ffmpeg` no PATH.
+      - name: Dependências de sistema (mpv + libmpv + ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y mpv libmpv-dev ffmpeg
 
       - name: Build (sdist + wheel)
         run: |
@@ -115,13 +120,32 @@ jobs:
           unzip -l dist/*.whl | grep -q 'ytmusic_tui/tui/app.tcss'
           tar tzf dist/*.tar.gz | grep -q 'ytmusic_tui/tui/app.tcss'
 
-      - name: Instalar o wheel em ambiente limpo
+      # T14-R1: o sdist também é instalado do zero (primeira cobertura
+      # deste caminho) — até aqui só o wheel era exercitado.
+      - name: Instalar wheel e sdist em ambientes limpos
         run: |
-          python -m venv /tmp/venv-pacote
-          /tmp/venv-pacote/bin/pip install dist/*.whl
+          python -m venv /tmp/venv-wheel
+          /tmp/venv-wheel/bin/pip install dist/*.whl
+          python -m venv /tmp/venv-sdist
+          /tmp/venv-sdist/bin/pip install dist/*.tar.gz
 
-      - name: Smoke test (import do app + CSS instalado + console script)
+      - name: Smoke test (import + CSS + console script) — wheel e sdist
         run: |
-          /tmp/venv-pacote/bin/python -c "import ytmusic_tui, ytmusic_tui.main, ytmusic_tui.tui.app; print('import ok')"
-          /tmp/venv-pacote/bin/python -c "import importlib.resources as res; assert res.files('ytmusic_tui.tui').joinpath('app.tcss').is_file(), 'app.tcss ausente na instalação'; print('css ok')"
-          test -x /tmp/venv-pacote/bin/ytmusic-tui
+          for venv in /tmp/venv-wheel /tmp/venv-sdist; do
+            "$venv/bin/python" -c "import ytmusic_tui, ytmusic_tui.main, ytmusic_tui.tui.app; print('import ok')"
+            "$venv/bin/python" -c "import importlib.resources as res; assert res.files('ytmusic_tui.tui').joinpath('app.tcss').is_file(), 'app.tcss ausente na instalação'; print('css ok')"
+            test -x "$venv/bin/ytmusic-tui"
+          done
+
+      # T14-R1 (Q4): os dois entry points suportados são exercitados — console
+      # script e `python -m ytmusic_tui`. O exit 0 é o esperado contra o HOME
+      # virgem do runner: diretórios e banco ausentes aparecem como "criado na
+      # 1ª abertura", não como erro.
+      - name: Doctor (execução real, exit 0) — wheel e sdist
+        run: |
+          for venv in /tmp/venv-wheel /tmp/venv-sdist; do
+            echo "== $venv (console script)"
+            "$venv/bin/ytmusic-tui" doctor
+            echo "== $venv (python -m ytmusic_tui)"
+            "$venv/bin/python" -m ytmusic_tui doctor
+          done
