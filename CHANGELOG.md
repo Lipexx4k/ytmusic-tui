@@ -25,9 +25,32 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   app) e resíduos de manutenção, com saída mascarada pronta para colar
   numa issue; exit code 0 (avisos) ou 1 (algo essencial quebrado), sem
   abrir a TUI
+- Monitor de contrato agendado (T09): o workflow `contract.yml` roda o L3
+  (integração real) toda segunda às 06:00 UTC e sob demanda
+  (`workflow_dispatch`), com regra de ruído zero — inconclusivo (sem
+  rede, serviço fora, runner bloqueado) vira skip com motivo e job verde;
+  mudança real de contrato falha com o relatório por campo/item
+- Suíte ponta a ponta controlada (T09): `tests/e2e/` (opt-in com
+  `YTMUSIC_E2E=1`, nunca no CI) constrói o wheel, instala num venv limpo
+  e roda doctor + busca + álbum + player + download reais, tudo isolado
+  em tmp e com limpeza conferida; runbook em `tests/e2e/README.md`
+
+### Alterado
+
+- Teste de integração real (L3) separa inconclusivo de contrato (T09):
+  falha de rede/serviço/rate limit vira skip com motivo explícito
+  ("inconclusivo: … — sem veredito de contrato"); contrato quebrado (ou
+  resposta fora do contrato do ytmusicapi) falha como sempre — a mesma
+  regra vale para o job agendado
+- README em inglês (T09): o arquivo inteiro passa para o inglês (código,
+  strings da interface, comentários e o CHANGELOG seguem em pt-BR)
 
 ### Corrigido
 
+- Monitor de contrato não cobra mais o `browseId` do detalhe do álbum
+  (T09): o `get_album` do ytmusicapi não ecoa o campo (é a entrada da
+  chamada, e o app já o tem) — a primeira rodada real do L3 flagrou a
+  exigência impossível herdada do T10-R6
 - Encerramento do app sob carga (T13): o registro de parada (`app_stop`)
   sai depois do teardown dos componentes — registrá-lo antes alargava a
   janela de uma corrida rara do encerramento do player (herdada do T11)
