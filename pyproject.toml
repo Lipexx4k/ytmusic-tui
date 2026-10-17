@@ -92,6 +92,13 @@ testpaths = ["tests"]
 markers = [
     "integration: testes que tocam a rede de verdade (rode com YTMUSIC_INTEGRATION=1)",
 ]
+# T14-R5 (incidente de 2026-10-16 no CI): um teste que passe de 10 min dumpa o
+# stack de todas as threads e derruba o pytest na hora — falha rápida com
+# diagnóstico em vez de horas silenciosas. Nenhum teste chega perto (folga
+# >50× sobre o maior teste local, ~15× no runner mais lento); o contrato
+# semanal (contract.yml) herda daqui por rodar o mesmo pytest.
+faulthandler_timeout = "600"
+faulthandler_exit_on_timeout = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

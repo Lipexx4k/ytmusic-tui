@@ -8,6 +8,12 @@ on:
 jobs:
   testes:
     runs-on: ubuntu-latest
+    # T14-R5: teto folgado para falhar rápido com diagnóstico (normal ~24 min).
+    # Nasceu do incidente de 2026-10-16 (run 38998741203): um step travado
+    # consumiu as 6 h de limite do GitHub em silêncio — sem stack, sem sinal.
+    # O faulthandler do pyproject (10 min/teste) dumpa as threads e derruba o
+    # pytest antes deste teto.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -50,16 +56,24 @@ jobs:
       - name: Testes (offline, com mocks)
         run: .venv/bin/python -m pytest tests/ -q
 
-      # T08: cobertura de branches INFORMATIVA em download/, library/ e
-      # player/ — sem threshold. Passo separado e não bloqueante de propósito:
-      # o gate de testes é o passo acima e não pode ser mascarado por este.
+      # T08 (reafirmada no T15-R7): cobertura de branches INFORMATIVA em
+      # download/, library/ e player/ — sem threshold. Passo separado e não
+      # bloqueante de propósito: o gate de testes é o passo acima e não pode
+      # ser mascarado por este; o continue-on-error fica.
+      # T14-R5: no incidente de 2026-10-16 este passo travou ~5h48m e o job só
+      # morreu no limite de 6 h do GitHub, sem stack nem sinal. Este timeout de
+      # step (normal ~12 min) corta mesmo sem dump; o faulthandler do pyproject
+      # (10 min/teste) adiciona o dump das threads antes disso.
       - name: Cobertura de branches (informativa, sem threshold)
         if: matrix.python-version == '3.13'
+        timeout-minutes: 20
         continue-on-error: true
         run: .venv/bin/python -m pytest tests/ -q --cov=ytmusic_tui.download --cov=ytmusic_tui.library --cov=ytmusic_tui.player --cov-branch --cov-report=term
 
   seguranca:
     runs-on: ubuntu-latest
+    # T14-R5: mesmo motivo do job `testes` (normal ~19 s).
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7
@@ -93,6 +107,8 @@ jobs:
   # automatizável no runner e segue coberta pelo L4 local (tests/e2e).
   pacote:
     runs-on: ubuntu-latest
+    # T14-R5: mesmo motivo do job `testes` (normal ~3 min).
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v7
