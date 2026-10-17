@@ -11,10 +11,19 @@ que os adaptadores consomem (``tests/contract.py``) e depois adapta de verdade
 relatório diz o quê, por campo e por item — atualize as fixtures do L2 antes
 de publicar a correção.
 
-Eles não entram no CI: existem para checar, quando desejado, se o que os
-mocks prometem continua batendo com o serviço real (busca, álbuns e os campos
-que a TUI usa — desde o T10-R1, os modelos internos ``video_id``,
-``browse_id`` e ``is_available``).
+Regra de ruído zero (T09/Q12 — a mesma do workflow ``contract.yml``):
+
+- **inconclusivo** (sem rede, serviço fora, rate limit, runner bloqueado) →
+  o teste **skipa** com motivo explícito ("inconclusivo: <classe> — sem
+  veredito de contrato"); o job agendado fica verde e repetir é o remédio;
+- **incompatibilidade de contrato** (o formato mudou de verdade) → **falha**
+  com o relatório por campo/item: é o sinal útil, job vermelho;
+- demais falhas (``InvalidResponseError`` — resposta fora do contrato do
+  ytmusicapi —, 404, bug nosso) também **falham**: um skip verde escondendo
+  quebra real seria pior que o ruído.
+
+O agendamento roda este arquivo toda segunda (06:00 UTC) no GitHub
+(``contract.yml``); localmente, ele continua opt-in.
 """
 
 import os
@@ -24,6 +33,8 @@ import pytest
 from tests import contract
 from ytmusic_tui.api import ytmusic
 from ytmusic_tui.api.adapt import album_detail_from_raw, search_result_from_raws
+from ytmusic_tui.api.classify import classify_exception
+from ytmusic_tui.errors import NetworkError, RateLimitError, ServiceUnavailableError
 
 pytestmark = [
     pytest.mark.integration,
@@ -35,6 +46,39 @@ pytestmark = [
 
 QUERY = "my dear melancholy"
 
+#: Classes INCONCLUSIVAS (T09/Q12): a falha está no caminho até o serviço, não
+#: no formato — não há veredito de contrato a dar (e repetir é o remédio).
+_INCONCLUSIVAS = (NetworkError, RateLimitError, ServiceUnavailableError)
+
+
+def _rede(operacao, *, context: str):
+    """Chama a rede real separando inconclusivo × contrato (T09/Q12).
+
+    Falha inconclusiva vira ``pytest.skip`` com o motivo padrão do job
+    agendado; o restante sobe **já classificado** (``APIError``) para o pytest
+    nomear a classe — contrato quebrado (ou resposta fora do contrato do
+    ytmusicapi) não pode virar skip verde.
+    """
+    try:
+        return operacao()
+    except Exception as exc:
+        error = classify_exception(exc, context=context)
+        if isinstance(error, _INCONCLUSIVAS):
+            pytest.skip(
+                f"inconclusivo: {type(error).__name__} — sem veredito de contrato "
+                f"(repita mais tarde; detalhe: {error})"
+            )
+        raise error from exc
+
+
+def _initialize() -> None:
+    """Garante o cliente anônimo; sem cliente não há contrato a checar."""
+    if not _rede(ytmusic.initialize, context="inicialização do cliente"):
+        pytest.skip(
+            "inconclusivo: cliente ytmusicapi não inicializou — sem veredito de "
+            f"contrato (repita mais tarde; detalhe: {ytmusic.last_error or 'sem detalhe'})"
+        )
+
 
 def _raw_search() -> tuple[list, list]:
     """Resposta crua da busca (sem adaptadores) para o monitor de contrato.
@@ -42,10 +86,16 @@ def _raw_search() -> tuple[list, list]:
     Usa o cliente do transporte de propósito: o contrato é entre o SERVIÇO e
     os adaptadores — o caminho público (``search_catalog``) já os aplica.
     """
-    assert ytmusic.initialize()
+    _initialize()
     client = ytmusic._require_client()
-    songs = client.search(QUERY, filter="songs", limit=10)
-    albums = client.search(QUERY, filter="albums", limit=10)
+    songs = _rede(
+        lambda: client.search(QUERY, filter="songs", limit=10),
+        context=f'busca "{QUERY}" (músicas)',
+    )
+    albums = _rede(
+        lambda: client.search(QUERY, filter="albums", limit=10),
+        context=f'busca "{QUERY}" (álbuns)',
+    )
     return songs, albums
 
 
@@ -78,7 +128,10 @@ def test_contrato_e_adaptacao_do_album_real():
         result.albums[0],
     )
 
-    raw = ytmusic._require_client().get_album(album.browse_id)
+    raw = _rede(
+        lambda: ytmusic._require_client().get_album(album.browse_id),
+        context=f"álbum {album.browse_id}",
+    )
     _assert_contract(
         "álbum (detalhe)",
         [raw],
@@ -100,7 +153,8 @@ def test_contrato_e_adaptacao_do_album_real():
 
 def test_fluxo_publico_real():
     """Smoke dos caminhos públicos (retry + cache + modelos) com a rede real."""
-    result = ytmusic.search_catalog(QUERY)
+    _initialize()
+    result = _rede(lambda: ytmusic.search_catalog(QUERY), context=f'busca "{QUERY}"')
 
     assert result.tracks, "esperava músicas no resultado"
     assert result.albums, "esperava álbuns no resultado"
@@ -111,7 +165,10 @@ def test_fluxo_publico_real():
         (item for item in result.albums if "Dear Melancholy" in item.title),
         result.albums[0],
     )
-    details = ytmusic.get_album(album.browse_id)
+    details = _rede(
+        lambda: ytmusic.get_album(album.browse_id),
+        context=f"álbum {album.browse_id}",
+    )
 
     assert details.title
     playable = [track for track in details.tracks if track.video_id and track.is_available]

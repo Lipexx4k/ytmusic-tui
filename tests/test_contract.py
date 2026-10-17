@@ -3,7 +3,14 @@
 Garante que o helper do L3 detecta o que promete detectar: campo essencial
 ausente/vazio, tipo inesperado (incluindo o formato duplo do álbum, A2),
 item não-dict, campos novos só como informativo e o teto de linhas.
+
+Fixa também, offline, a regra de ruído zero do L3 (T09/Q12): falha
+inconclusiva (rede/serviço/rate-limit) vira skip com motivo; resposta fora do
+contrato do ytmusicapi falha (não pode virar skip verde).
 """
+
+import pytest
+import requests
 
 from tests import contract
 
@@ -126,7 +133,57 @@ def test_inspect_limita_linhas_do_relatorio():
     assert f"... mais {30 - contract.PROBLEM_LIMIT} problema(s)" in report
 
 
-if __name__ == "__main__":
-    import pytest
+def test_album_detalhe_valido_sem_browse_id():
+    """O ``get_album`` não ecoa o browseId: detalhe sem o campo é conforme (T09).
 
+    O id é entrada da chamada, não campo da resposta (ytmusicapi 1.8–1.12.3);
+    cobrá-lo como essencial do detalhe acusaria mudança onde não há — a
+    primeira rodada real do L3 pegou exatamente isso.
+    """
+    item = {
+        "title": "My Dear Melancholy,",
+        "type": "EP",
+        "artists": [{"name": "The Weeknd"}],
+        "thumbnails": [],
+        "tracks": [{"videoId": "v1", "title": "T"}],
+    }
+
+    assert (
+        contract.check_item(
+            item,
+            contract.CONSUMED_ALBUM_DETAIL,
+            where="álbum",
+            essential=contract.ESSENTIAL_ALBUM_DETAIL,
+        )
+        == []
+    )
+
+
+def test_l3_inconclusivo_vira_skip_com_motivo():
+    """Falha de rede no L3 é inconclusiva: skip explícito, nunca veredito (T09/Q12)."""
+    from tests import test_integration
+
+    def sem_rede():
+        raise requests.exceptions.ConnectionError("rede fora do ar")
+
+    with pytest.raises(
+        pytest.skip.Exception,
+        match="inconclusivo: NetworkError — sem veredito de contrato",
+    ):
+        test_integration._rede(sem_rede, context="teste offline")
+
+
+def test_l3_contrato_quebrado_falha_em_vez_de_skip():
+    """Resposta fora do contrato do ytmusicapi FALHA (não pode virar skip)."""
+    from tests import test_integration
+    from ytmusic_tui.errors import InvalidResponseError
+
+    def formato_mudou():
+        raise KeyError("videoId")
+
+    with pytest.raises(InvalidResponseError, match="possível mudança de formato"):
+        test_integration._rede(formato_mudou, context="teste offline")
+
+
+if __name__ == "__main__":
     pytest.main([__file__, "-v"])
