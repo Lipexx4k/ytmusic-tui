@@ -44,6 +44,12 @@ YTMUSIC_E2E=1 .venv/bin/python -m pytest tests/e2e -v -s --basetemp=/tmp/e2e-l4
 ls -R /tmp/e2e-l4   # fonte copiada, dist/, venv/, music/, state/…
 ```
 
+> **Instabilidade externa:** o fluxo depende do YouTube — uma rodada pode
+> falhar num passo de rede (player que não carrega ou `403` no download) por
+> oscilação do serviço, como o app real também sofreria no mesmo momento.
+> Espere um pouco e rode de novo; se persistir, aí sim investigue como
+> falha de verdade.
+
 ## Conferência manual (a TUI de ponta a ponta)
 
 O que a automação não cobre: a interação real (mouse/teclas) e o julgamento
