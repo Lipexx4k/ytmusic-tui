@@ -171,11 +171,13 @@ In every family: `mpv` (with libmpv) is **mandatory** — the app won't start wi
 pipx install git+https://github.com/pr0sthetics/ytmusic-tui
 ```
 
-**Option B — pip:**
+**Option B — pip** (only where `pip --user` is allowed):
 
 ```bash
 pip install --user git+https://github.com/pr0sthetics/ytmusic-tui
 ```
+
+> On distros where the system Python is **externally managed** — Debian 12+, Ubuntu 23.04+ (including Linux Mint and LMDE) — pip refuses `--user` installs by policy ([PEP 668](https://peps.python.org/pep-0668/)). There, use Option A (pipx) or a dedicated venv; the `pip` commands in the sections below have the same restriction.
 
 **Option C — from source (for development):**
 
@@ -196,10 +198,64 @@ mkdir -p ~/.config/ytmusic-tui
 cp config.example.toml ~/.config/ytmusic-tui/config.toml
 ```
 
+### 4. Updating and downgrading
+
+**Updating** (installs from the git URL follow the default branch):
+
+```bash
+pipx upgrade ytmusic-tui                                                      # Option A (pipx)
+pip install --user --upgrade git+https://github.com/pr0sthetics/ytmusic-tui    # Option B (pip)
+```
+
+If pipx reports "already at latest version" but you want a fresh install from the branch (the version number doesn't change between commits), force it:
+
+```bash
+pipx install --force git+https://github.com/pr0sthetics/ytmusic-tui
+```
+
+**Downgrading — pin an exact version** (any tag, e.g. `v0.1.3`):
+
+```bash
+pipx install --force git+https://github.com/pr0sthetics/ytmusic-tui@v0.1.3
+pip install --user --force-reinstall git+https://github.com/pr0sthetics/ytmusic-tui@v0.1.3
+```
+
+Tags are listed at [pr0sthetics/ytmusic-tui/tags](https://github.com/pr0sthetics/ytmusic-tui/tags). A tag-pinned install stays pinned — `pipx upgrade` won't move it; to go back to the latest, reinstall without the tag (see *Updating*).
+
+### 5. Uninstalling
+
+```bash
+pipx uninstall ytmusic-tui     # Option A (pipx)
+pip uninstall ytmusic-tui      # Option B (pip)
+```
+
+Uninstalling removes **only the app** (code + launcher). Your **local library and downloads are NOT removed** — they stay in place, ready for a possible reinstall.
+
+### Removing local data (only if you want to)
+
+The app never deletes any of this on its own. To remove everything:
+
+| What | Path (Linux) | Remove with |
+|-------|--------------|-------------|
+| Configuration | `~/.config/ytmusic-tui/` | `rm -rf ~/.config/ytmusic-tui` |
+| Library (SQLite + backups) | `~/.local/share/ytmusic-tui/` | `rm -rf ~/.local/share/ytmusic-tui` |
+| Cache | `~/.cache/ytmusic-tui/` | `rm -rf ~/.cache/ytmusic-tui` |
+| Logs | `~/.local/state/ytmusic-tui/` | `rm -rf ~/.local/state/ytmusic-tui` |
+| Downloads | `~/Music/YouTube Music/` | `rm -rf "$HOME/Music/YouTube Music"` |
+
 ### Common installation problems
 
 - **`Cannot find libmpv in the usual places`** (or a similar python-mpv message) when opening the app: Python couldn't find libmpv. On Ubuntu/Debian also install `sudo apt install libmpv-dev` — it provides the `libmpv.so` symlink Python looks for (on Ubuntu 24.04, for example, the `mpv` package alone is not always enough).
 - **Music doesn't play / the stream fails**: it's almost always yt-dlp out of date with some YouTube change — update the app and yt-dlp in the same install environment (`pip install -U yt-dlp` in the venv, or `pipx upgrade` + `pipx runpip ytmusic-tui install -U yt-dlp`).
+- **`pipx` inside a container (distrobox/toolbox) sharing `$HOME`**: with a shared HOME, pipx writes its venv and metadata into the **host's** pipx (`~/.local/share/pipx`), but built with the **container's** Python — once the container is gone you are left with an orphaned venv and stray launchers in `~/.local/bin`. Rule: **run pipx in the same environment where you want the app installed**. Inside a container/toolbox, isolate pipx instead:
+
+  ```bash
+  # inside the container/toolbox: keep pipx state and launchers out of the host's
+  export PIPX_HOME="$HOME/.local/share/pipx-ytmusic"
+  export PIPX_BIN_DIR="$HOME/.local/bin-ytmusic"
+  pipx install git+https://github.com/pr0sthetics/ytmusic-tui
+  # the launcher lands in $PIPX_BIN_DIR — add that directory to your PATH
+  ```
 
 ## 🚀 Usage
 
@@ -208,6 +264,8 @@ ytmusic-tui              # installed via pip/pipx
 python -m ytmusic_tui    # as a module
 python main.py           # straight from the source tree (uses src/, no install)
 ```
+
+`ytmusic-tui` (console script) and `python -m ytmusic_tui` are both **supported entry points** and equivalent, `doctor` included; `python main.py` only works from a source checkout.
 
 ### Basic flow
 
@@ -453,6 +511,8 @@ Dependencies are updated by **Dependabot** (weekly PRs, dev/runtime groups — w
 Each release corresponds to a **traceable commit** with the version in `pyproject.toml` and an entry in `CHANGELOG.md`, an annotated tag (`vX.Y.Z`) and a **green CI on the commit** (e.g.: `v0.1.2` → commit `84b6d80`). Releases are **manual** — nothing is published automatically; artifact hashes (SHA-256) and process automation are a future step.
 
 Dependency updates follow a single path: **Dependabot opens the PR → mandatory CI (3.11/3.13 + lockfile + pip-audit + package) → manual merge**. Merging is not releasing: no update goes straight into a stable release.
+
+Looking to update a **local installation** (pipx/pip), pin an older version or uninstall? That's covered in *Installation → Updating and downgrading*.
 
 ## 🗺️ Roadmap
 
