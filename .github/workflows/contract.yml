@@ -1,0 +1,43 @@
+name: Contrato
+
+# T09/Q12 — monitor de contrato do serviço real (§10.2): o L3 (opt-in) roda
+# toda segunda, 06:00 UTC, e sob demanda pelo workflow_dispatch.
+#
+# Regra de ruído zero: inconclusivo (sem conectividade, serviço fora, runner
+# bloqueado) SKIPA com motivo explícito e o job fica VERDE — repetir é o
+# remédio; incompatibilidade de contrato FALHA com o relatório por campo/item
+# e o job fica VERMELHO — este é o sinal útil (a correção vira trabalho à
+# parte; o relatório no log do job é o anexo). O L3 local continua exigido no
+# pré-release.
+#
+# Fallback registrado: se os runners ficarem sempre inconclusivos (YouTube
+# bloqueando IPs de datacenter), reavaliar o agendamento — ex.: deixar só o
+# workflow_dispatch e rodar o L3 localmente.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # segunda, 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  contrato:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Mesmo pin do ci.yml (sem tag móvel "v10"): o Dependabot (grupo
+      # actions) atualiza a versão.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      # Sem apt-get de propósito: a coleta e a execução do L3 não importam a
+      # TUI/mpv — tests/conftest.py importa só api/config/library.database (o
+      # fixture do ffmpeg importa download, que não usa mpv; `import mpv` só
+      # existe em player/). Se um dia a coleta pedir, traga para cá os pacotes
+      # do ci.yml (mpv + libmpv-dev + ffmpeg).
+      - name: Instalar a partir do lockfile (uv sync --locked)
+        run: uv sync --locked --extra dev --python 3.13
+
+      - name: L3 — integração real com monitor de contrato
+        run: YTMUSIC_INTEGRATION=1 .venv/bin/python -m pytest tests/test_integration.py -v -s
