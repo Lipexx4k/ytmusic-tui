@@ -66,8 +66,11 @@ def main(argv: list[str] | None = None) -> None:
         from ytmusic_tui.tui.app import main as run
     except OSError as exc:  # pragma: no cover - depende do sistema
         print(
-            "ytmusic-tui precisa do player mpv instalado (pacote `mpv` da sua "
-            "distro, que inclui a libmpv — no macOS: `brew install mpv`).\n"
+            "ytmusic-tui precisa do player mpv instalado (o pacote `mpv` da sua "
+            "distro traz a libmpv):\n"
+            "  Debian/Ubuntu/Mint/LMDE:  sudo apt install mpv libmpv-dev\n"
+            "  Fedora:                   sudo dnf install mpv\n"
+            "  Arch/Manjaro/EndeavourOS: sudo pacman -S mpv\n"
             f"Detalhe técnico: {exc}",
             file=sys.stderr,
         )

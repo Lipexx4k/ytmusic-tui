@@ -111,9 +111,9 @@ A **minimalist, fast TUI client** for YouTube Music, right in your terminal: sea
 
 ## 📋 Requirements
 
-- **Python 3.11+**
-- **mpv** (with libmpv) — it's the player. On most distros the `mpv` package already includes libmpv (if the app won't open, see *Common installation problems*)
-- **ffmpeg** — conversion and tagging of downloads
+- **Python 3.11–3.13** — the supported range (3.14 is not validated yet; see *Compatibility*)
+- **mpv** (with libmpv) — **required**: it's the player, the app won't start without it (on Ubuntu/Debian, `libmpv-dev` may be needed too — see *Common installation problems*)
+- **ffmpeg** — required for downloads (conversion and tagging); search and playback work without it
 - Python dependencies (ytmusicapi, textual, yt-dlp, sqlalchemy…) are installed via pip/pipx along with the app
 - A terminal with colors (256/true color) and Unicode — **minimum 80×24**, 100×30+ recommended
 
@@ -157,9 +157,11 @@ sudo dnf install mpv ffmpeg python3
 # openSUSE
 sudo zypper install mpv ffmpeg python3
 
-# macOS (Homebrew)
+# macOS (not officially supported — community path)
 brew install mpv ffmpeg python
 ```
+
+In every family: `mpv` (with libmpv) is **mandatory** — the app won't start without it; `ffmpeg` is **required for downloads** (search and playback work without it); Python is required to run the app. `python3-venv` (Debian/Ubuntu) is only needed to create virtualenvs yourself (Option C) — the `pipx` package already depends on it.
 
 ### 2. Install the app
 
