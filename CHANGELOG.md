@@ -84,6 +84,13 @@ e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
   "externamente gerenciado" (PEP 668 — Debian/Ubuntu/Mint/LMDE) recusam
   esse caminho (T14), comprovado numa rodada real em Ubuntu 24.04; lá, o
   caminho é pipx ou um venv dedicado
+- Deadlock raro do encerramento do player (T11.1/Q14): um evento do
+  libmpv em voo durante o teardown prendia a thread de eventos em
+  `call_from_thread` — esperando o loop, que por sua vez esperava o
+  `join()` do `terminate()` — o travamento capturado pelos dumps do CI em
+  2026-10-17; a entrega player→UI vinda de outra thread passou a usar
+  `post_message` (thread-safe, não bloqueante) e um teste de regressão
+  força a janela com o handle real
 
 ## [0.1.4] - 2026-10-16
 
