@@ -119,12 +119,17 @@ A **minimalist, fast TUI client** for YouTube Music, right in your terminal: sea
 
 ## 🖥️ Compatibility
 
-| Platform | Status |
-|------------|--------|
-| **Linux** | ✅ **Tested** — developed and used on LMDE 7 (Debian 13 base). Any distro with Python 3.11+ and mpv should work |
-| **macOS** | 🟡 Untested — should work with `brew install mpv ffmpeg` |
-| **Windows (WSL2)** | 🟡 Untested — works inside WSL following the Linux instructions |
-| **Windows (native)** | ❌ Not officially supported — would require configuring the libmpv DLL manually |
+Levels are explicit — "works" below means what the project actually validates:
+
+| Level | Platform | Status |
+|-------|----------|--------|
+| ⭐ **Reference** | **LMDE 7 / Linux Mint** | The platform the author uses daily, on two machines (Debian 13 base); everything is developed and tested here first |
+| ✅ **Distribution** | **Ubuntu / Debian-compatible** | Same packaging base (Python 3.11–3.13, mpv + ffmpeg); CI builds, installs and runs the published artifacts on Ubuntu 24.04 |
+| 🟡 **Compatibility** | **Other Linux distros** | Any distro with Python 3.11–3.13, mpv (with libmpv) and ffmpeg should work — untested by the project |
+| 🖥️ **Interface** | **Terminal** | Colors (256/true color) and Unicode; **minimum 80×24**, 100×30+ recommended |
+| ❌ **Not officially supported** | **macOS** | Might work with `brew install mpv ffmpeg` — a community path, not validated, nothing promised |
+| ❌ **Not officially supported** | **Windows (WSL2)** | Runs inside WSL following the Linux instructions — not validated |
+| ❌ **Not officially supported** | **Windows (native)** | Would require configuring the libmpv DLL manually |
 
 ## ✅ Known-good versions
 
@@ -132,7 +137,7 @@ Validated combinations (the exact Python dependency set used in CI is in [`uv.lo
 
 | Component | Validated version | How to check |
 |---|---|---|
-| **Python** | 3.11–3.13 (CI runs on 3.11 and 3.13; author's development on 3.13.5) | `python3 --version` |
+| **Python** | 3.11–3.13 — the supported range (3.11 + 3.13 in CI; 3.12 validated locally with the full suite; 3.14 not validated yet) | `python3 --version` |
 | **mpv / libmpv** | mpv 0.40.0 with libmpv.so.2 (LMDE 7 / Debian 13) | `mpv --version \| head -n1` · `ldconfig -p \| grep libmpv` |
 | **ffmpeg** | 7.1.5 (Debian 13) | `ffmpeg -version \| head -n1` |
 | **yt-dlp** | floor `>=2024.1.0` in pyproject; 2026.8.19 in the author's environment | `yt-dlp --version` · in the venv: `python -c "import yt_dlp; print(yt_dlp.version.__version__)"` |
@@ -502,7 +507,7 @@ Two more test layers are **opt-in**, never run in CI:
 - **L3 — real integration** (`tests/test_integration.py`): talks to the real YouTube Music and compares the raw service response with the contract the adapters consume, producing a per-field and per-item report when the format changes (run with `-s` to see the report). It also runs **every Monday at 06:00 UTC** in the `contract.yml` workflow (`workflow_dispatch` runs it on demand). Zero-noise rule: **inconclusive** (offline, service down, runner blocked) makes the tests skip with an explicit reason and the run stays green; a **contract break** fails with the report and the run turns red — the useful signal.
 - **L4 — controlled end-to-end** (`tests/e2e/`, opt-in with `YTMUSIC_E2E=1`): builds the wheel, installs it in a clean venv and runs the real flow (doctor → search → album → player → download) fully isolated in tmp. Runbook in `tests/e2e/README.md`.
 
-The **CI (GitHub Actions)** runs `ruff` + the offline suite on Python 3.11 and 3.13 on every push, **installing from `uv.lock`** (`uv sync --locked` — the job fails if the lockfile is missing or out of sync with `pyproject.toml`), a security job that exports the locked set and runs `pip-audit` (fails on a known vulnerability) and a package job that checks the wheel/sdist contents and installs the wheel in a clean environment. Branch coverage (download, library and player) runs in the test job as an **informative** step — no threshold and no CI blocking —, on a single leg (Python 3.13).
+The **CI (GitHub Actions)** runs `ruff` + the offline suite on Python 3.11 and 3.13 on every push, **installing from `uv.lock`** (`uv sync --locked` — the job fails if the lockfile is missing or out of sync with `pyproject.toml`), a security job that exports the locked set and runs `pip-audit` (fails on a known vulnerability) and a package job that checks the wheel/sdist contents, installs **both** in clean environments and runs `doctor` (console script and `python -m ytmusic_tui`). Branch coverage (download, library and player) runs in the test job as an **informative** step — no threshold and no CI blocking —, on a single leg (Python 3.13).
 
 Dependencies are updated by **Dependabot** (weekly PRs, dev/runtime groups — with the lockfile, it updates `uv.lock` and `pyproject.toml` together): CI runs on every PR, so an update that breaks the app is visible there before it lands — handy for a project that depends on external services that change often (YouTube, mpv, yt-dlp).
 
