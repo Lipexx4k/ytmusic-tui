@@ -5,13 +5,13 @@ Cliente **TUI minimalista e rápido** para YouTube Music, direto no terminal: bu
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-542%20passando-brightgreen)
-![CI](https://github.com/Lipexx4k/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/pr0sthetics/ytmusic-tui/actions/workflows/ci.yml/badge.svg)
 ![Vibe-coded](https://img.shields.io/badge/vibe--coded-~80%25-ff69b4)
 
 > ## ⚠️ Aviso de honestidade: este projeto é ~80% "vibe-coded"
 >
 > A maior parte deste código foi escrita em **vibe coding** — conversando com um assistente de IA, com revisão, ajustes e testes manuais do autor no meio do caminho. São **542 testes automatizados** e uso real no dia a dia, então **funciona de verdade** — mas espere arestas: bugs ocasionais, código "com cara de IA" aqui e ali e funcionalidades faltando (veja **Limitações**).
-> Achou um bug? Abra uma [issue](https://github.com/Lipexx4k/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
+> Achou um bug? Abra uma [issue](https://github.com/pr0sthetics/ytmusic-tui/issues). PRs são muito bem-vindos! 💜
 
 ---
 
@@ -166,19 +166,19 @@ brew install mpv ffmpeg python
 **Opção A — pipx (recomendada, ambiente isolado):**
 
 ```bash
-pipx install git+https://github.com/Lipexx4k/ytmusic-tui
+pipx install git+https://github.com/pr0sthetics/ytmusic-tui
 ```
 
 **Opção B — pip:**
 
 ```bash
-pip install --user git+https://github.com/Lipexx4k/ytmusic-tui
+pip install --user git+https://github.com/pr0sthetics/ytmusic-tui
 ```
 
 **Opção C — do código-fonte (para desenvolver):**
 
 ```bash
-git clone https://github.com/Lipexx4k/ytmusic-tui
+git clone https://github.com/pr0sthetics/ytmusic-tui
 cd ytmusic-tui
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -367,7 +367,7 @@ ytmusic-tui/
 ## 🛠️ Desenvolvimento
 
 ```bash
-git clone https://github.com/Lipexx4k/ytmusic-tui
+git clone https://github.com/pr0sthetics/ytmusic-tui
 cd ytmusic-tui
 uv sync --locked --extra dev    # cria/atualiza o .venv a partir do uv.lock
 

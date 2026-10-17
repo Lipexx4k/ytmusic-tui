@@ -46,9 +46,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Lipexx4k/ytmusic-tui"
-Repository = "https://github.com/Lipexx4k/ytmusic-tui"
-Issues = "https://github.com/Lipexx4k/ytmusic-tui/issues"
+Homepage = "https://github.com/pr0sthetics/ytmusic-tui"
+Repository = "https://github.com/pr0sthetics/ytmusic-tui"
+Issues = "https://github.com/pr0sthetics/ytmusic-tui/issues"
 
 [project.scripts]
 ytmusic-tui = "ytmusic_tui.main:main"
