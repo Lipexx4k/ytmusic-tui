@@ -11,12 +11,12 @@ Este módulo fica com a classe ``YTMusicTUI`` (ciclo de vida do app) e o
 ponto de entrada ``main()``.
 """
 
-import contextlib
 import logging
 import threading
 
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
+from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import TabbedContent
 
@@ -33,6 +33,19 @@ from ytmusic_tui.tui.widgets import NowPlayingBar
 from ytmusic_tui.versions import versions_summary
 
 logger = logging.getLogger(__name__)
+
+
+class PlayerEventMessage(Message):
+    """Evento do player entregue à thread da UI (T11.1/Q14).
+
+    Nasce na thread de eventos do libmpv: entra na fila do app por
+    ``post_message`` (thread-safe e não bloqueante) e o handler roda na
+    thread principal — onde os widgets podem ser tocados.
+    """
+
+    def __init__(self, event: PlayerEvent) -> None:
+        super().__init__()
+        self.event = event
 
 
 class YTMusicTUI(App):
@@ -117,8 +130,19 @@ class YTMusicTUI(App):
             return
         # Observers/eventos do mpv rodam na thread de eventos do libmpv;
         # widgets do Textual só podem ser tocados na thread principal.
-        with contextlib.suppress(Exception):  # app encerrando
-            self.call_from_thread(self._handle_player_event, event)
+        # T11.1 (Q14): entrega por `post_message` — thread-safe e NÃO
+        # bloqueante. O `call_from_thread` anterior prendia a thread do
+        # libmpv até o loop processar o evento; se a entrega caísse na
+        # janela do encerramento (loop parado no `on_unmount`), o `join()`
+        # do `terminate()` esperava para sempre essa thread — o deadlock
+        # dos dumps do CI (2026-10-17). Evento em voo durante o teardown
+        # pode ser descartado pela guarda de fechamento do `post_message`,
+        # como manda a semântica do T11-R2.
+        self.post_message(PlayerEventMessage(event))
+
+    def on_player_event_message(self, message: PlayerEventMessage) -> None:
+        """Entrega na thread da UI o evento que nasceu na thread do libmpv."""
+        self._handle_player_event(message.event)
 
     def _current_main_screen(self) -> MainScreen | None:
         """Tela principal ativa, ou ``None`` se não houver tela na pilha.
@@ -207,14 +231,10 @@ class YTMusicTUI(App):
         download_manager.shutdown()
         db_manager.close()
         # T13 (§13.1): o "app_stop" fecha a sessão do log — e fica no FIM do
-        # unmount de propósito. Entre o início deste handler e o
-        # `player.shutdown()` (que ativa a guarda de eventos) existe a janela
-        # em que um evento atrasado do libmpv bloquearia a thread do mpv em
-        # `call_from_thread`, à espera do loop que só volta depois do
-        # `terminate()` juntá-la — deadlock (corrida pré-existente do T11,
-        # reproduzida na L2). `versions_summary()` leva ~6-23ms
-        # (importlib.metadata) e no topo da função alargava essa janela em
-        # ~1000x; depois do teardown não há janela para alargar.
+        # unmount de propósito: nada é registrado depois dele. (O
+        # posicionamento também estreitava a janela de deadlock do
+        # `call_from_thread`; o T11.1/Q14 fechou a janela na raiz — a
+        # entrega player→UI não bloqueia mais a thread do libmpv.)
         log_event("tui.app", "app_stop", versions_summary())
 
 
